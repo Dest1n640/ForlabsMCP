@@ -10,17 +10,29 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import ForlabsConfig
-from .models import Identity, Stream, Study
-from .parsers import parse_scores, parse_streams, parse_studies
-from .partial import PartialResult
+from ..errors import ForlabsError
+from .models import Identity, Stream, Study, TaskFile
+from .parsers import parse_assignments, parse_scores, parse_streams, parse_studies, parse_tasks
+from .partial import PartialResult, combine
 from .repository import Repository
 from .session import ForlabsSession
 
 SCORE_STATUS_LABELS = {1: "in progress", 2: "in progress", 5: "completed"}
+HOMEWORK_DONE_STATUSES = {3}
 
 
 def _stream_to_dict(stream: Stream) -> dict[str, Any]:
     return {"id": stream.id, "name": stream.name, "is_own": stream.is_own}
+
+
+def _task_file_to_dict(task_file: TaskFile) -> dict[str, Any]:
+    return {
+        "id": task_file.id,
+        "filename": task_file.filename,
+        "url": task_file.url,
+        "size": task_file.size,
+        "human_size": task_file.human_size,
+    }
 
 
 def _study_to_dict(study: Study) -> dict[str, Any]:
@@ -120,3 +132,84 @@ class ForlabsClient:
         if not rows:
             result["note"] = "No grades found for the given filters."
         return result
+
+    def homework(
+        self,
+        stream_id: int | None = None,
+        study_id: int | None = None,
+        only_outstanding: bool = False,
+    ) -> dict[str, Any]:
+        if stream_id is not None:
+            target_stream_id = stream_id
+        else:
+            own_stream_id, _ = self._discover_own_stream()
+            target_stream_id = own_stream_id
+
+        studies_result = self._fetch_studies(target_stream_id)
+        warnings: list[str] = list(studies_result.warnings)
+        studies_by_id = {study.id: study for study in studies_result.data}
+
+        target_study_ids = (
+            [study_id] if study_id is not None else [study.id for study in studies_result.data]
+        )
+
+        per_study_results = [
+            self._homework_for_study(target_stream_id, sid, studies_by_id)
+            for sid in target_study_ids
+        ]
+        combined = combine(per_study_results)
+        warnings.extend(combined.warnings)
+        rows = combined.data
+
+        if only_outstanding:
+            rows = [row for row in rows if not row["is_done"]]
+
+        result: dict[str, Any] = {"homework": rows, "warnings": warnings}
+        if not rows:
+            result["note"] = "No homework found for the given filters."
+        return result
+
+    def _homework_for_study(
+        self, stream_id: int | None, study_id: int, studies_by_id: dict[int, Study]
+    ) -> PartialResult[list[dict[str, Any]]]:
+        try:
+            payload = self._repository.call(
+                "learning",
+                "get_tasks",
+                {"stream_id": str(stream_id), "study_id": str(study_id)},
+            )
+        except ForlabsError as exc:
+            return PartialResult(
+                data=[], warnings=[f"Failed to fetch homework for study {study_id}: {exc}"]
+            )
+
+        raw_tasks = payload.get("tasks", []) if isinstance(payload, dict) else []
+        raw_assignments = payload.get("assignments", []) if isinstance(payload, dict) else []
+        tasks_result = parse_tasks(raw_tasks)
+        assignments_result = parse_assignments(raw_assignments)
+        warnings = list(tasks_result.warnings) + list(assignments_result.warnings)
+
+        assignments_by_task_id = {a.task_id: a for a in assignments_result.data}
+        study = studies_by_id.get(study_id)
+
+        rows: list[dict[str, Any]] = []
+        for task in tasks_result.data:
+            assignment = assignments_by_task_id.get(task.id)
+            status = assignment.status if assignment is not None else None
+            rows.append(
+                {
+                    "task_id": task.id,
+                    "title": task.name,
+                    "study_id": study_id,
+                    "study_name": study.name if study is not None else None,
+                    "status": status,
+                    "is_done": status in HOMEWORK_DONE_STATUSES,
+                    "credits_earned": assignment.credits if assignment is not None else None,
+                    "max_credits": task.max_credits,
+                    "due_at": task.due_at,
+                    "assessed_at": assignment.assessed_at if assignment is not None else None,
+                    "chapter": task.chapter_title,
+                    "files": [_task_file_to_dict(f) for f in task.files],
+                }
+            )
+        return PartialResult(data=rows, warnings=warnings)

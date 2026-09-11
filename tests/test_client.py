@@ -188,3 +188,129 @@ def test_scores_with_explicit_stream_id_never_discovers_own_stream(tmp_path) -> 
 
     client = ForlabsClient(_config(tmp_path))
     client.scores(stream_id=205)
+
+
+def _tasks_side_effect_only_for_study(target_study_id: str, tasks_fixture: dict):
+    def _side_effect(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body["study_id"] == target_study_id:
+            return httpx.Response(200, json=tasks_fixture)
+        return httpx.Response(200, json={"tasks": [], "assignments": []})
+
+    return _side_effect
+
+
+@respx.mock
+def test_homework_without_study_id_unions_across_studies(tmp_path) -> None:
+    _mock_login_success()
+    studies_fixture = _load("learning_get_studies.json")
+    tasks_fixture = _load("learning_get_tasks.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+    tasks_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        side_effect=_tasks_side_effect_only_for_study("10823", tasks_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.homework(stream_id=205)
+
+    assert result["warnings"] == []
+    assert len(result["homework"]) == len(tasks_fixture["tasks"])
+    assert all(row["study_id"] == 10823 for row in result["homework"])
+    assert all(row["study_name"] == "Управление базами данных" for row in result["homework"])
+    assert all(row["is_done"] is True for row in result["homework"])
+    # one learning/get_tasks call per study in the studies fixture
+    assert tasks_route.call_count == len(studies_fixture["studies"])
+
+
+@respx.mock
+def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) -> None:
+    _mock_login_success()
+    studies_fixture = _load("learning_get_studies.json")
+    tasks_fixture = _load("learning_get_tasks.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+
+    def _side_effect(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body["study_id"] == "11590":
+            return httpx.Response(500, json={"error": "internal"})
+        if body["study_id"] == "10823":
+            return httpx.Response(200, json=tasks_fixture)
+        return httpx.Response(200, json={"tasks": [], "assignments": []})
+
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        side_effect=_side_effect
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.homework(stream_id=205)
+
+    assert len(result["homework"]) == len(tasks_fixture["tasks"])
+    assert len(result["warnings"]) == 1
+    assert "11590" in result["warnings"][0]
+
+
+@respx.mock
+def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
+    _mock_login_success()
+    studies_fixture = _load("learning_get_studies.json")
+    tasks_fixture = _load("learning_get_tasks.json")
+    partial_tasks_fixture = {
+        "tasks": tasks_fixture["tasks"],
+        "assignments": tasks_fixture["assignments"][:1],
+    }
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        side_effect=_tasks_side_effect_only_for_study("10823", partial_tasks_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    all_result = client.homework(stream_id=205)
+    outstanding_result = client.homework(stream_id=205, only_outstanding=True)
+
+    assert len(all_result["homework"]) == 3
+    assert len(outstanding_result["homework"]) == 2
+    assert all(row["is_done"] is False for row in outstanding_result["homework"])
+
+
+@respx.mock
+def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
+    _mock_login_success()
+    studies_fixture = _load("learning_get_studies.json")
+    tasks_fixture = _load("learning_get_tasks.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+    tasks_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        return_value=httpx.Response(200, json=tasks_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.homework(stream_id=205, study_id=10823)
+
+    assert tasks_route.call_count == 1
+    sent_body = json.loads(tasks_route.calls.last.request.content)
+    assert sent_body == {"stream_id": "205", "study_id": "10823"}
+    assert len(result["homework"]) == len(tasks_fixture["tasks"])
+
+
+@respx.mock
+def test_homework_with_no_results_returns_note(tmp_path) -> None:
+    _mock_login_success()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json={"studies": []})
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        return_value=httpx.Response(200, json={"tasks": [], "assignments": []})
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.homework(stream_id=205, study_id=999)
+
+    assert result["homework"] == []
+    assert "note" in result
