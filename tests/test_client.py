@@ -90,3 +90,101 @@ def test_reference_with_explicit_stream_id_filters_studies_call(tmp_path) -> Non
 
     sent_body = json.loads(studies_route.calls.last.request.content)
     assert sent_body == {"stream_id": 199}
+
+
+@respx.mock
+def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
+    _mock_login_success()
+    scores_fixture = _load("learning_get_scores.json")
+    studies_fixture = _load("learning_get_studies.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+        return_value=httpx.Response(200, json=scores_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.scores(stream_id=205)
+
+    assert result["warnings"] == []
+    assert "note" not in result
+    row = next(r for r in result["scores"] if r["study_id"] == 8975)
+    assert row["study_name"] == "Основы государственного управления"
+    assert row["status_label"] == "completed"
+    assert "name_note" not in row
+
+
+@respx.mock
+def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
+    _mock_login_success()
+    scores_fixture = _load("learning_get_scores.json")
+    # No matching entry in the studies fixture for any of these study_ids
+    # under stream 205 alone would already be a stretch; force the case by
+    # using a stream whose studies fixture is empty.
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+        return_value=httpx.Response(200, json=scores_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json={"studies": []})
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.scores(stream_id=205)
+
+    assert len(result["scores"]) == len(scores_fixture["scores"])
+    for row in result["scores"]:
+        assert row["study_name"] is None
+        assert row["name_note"] == "name not found"
+
+
+@respx.mock
+def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
+    _mock_login_success()
+    scores_fixture = _load("learning_get_scores.json")
+    studies_fixture = _load("learning_get_studies.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+        return_value=httpx.Response(200, json=scores_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.scores(stream_id=205, study_id=8975)
+
+    assert len(result["scores"]) == 1
+    assert result["scores"][0]["study_id"] == 8975
+
+
+@respx.mock
+def test_scores_with_no_matches_returns_note(tmp_path) -> None:
+    _mock_login_success()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+        return_value=httpx.Response(200, json={"scores": {}})
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json={"studies": []})
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.scores(stream_id=205)
+
+    assert result["scores"] == []
+    assert "note" in result
+
+
+@respx.mock
+def test_scores_with_explicit_stream_id_never_discovers_own_stream(tmp_path) -> None:
+    _mock_login_success()
+    # No sched/get_schedule route is registered at all - if the client
+    # called it, respx would raise for the unmatched request.
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+        return_value=httpx.Response(200, json={"scores": {}})
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json={"studies": []})
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    client.scores(stream_id=205)

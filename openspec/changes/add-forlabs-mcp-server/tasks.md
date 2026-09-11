@@ -86,7 +86,7 @@
   `respx`-mocked test using the fixtures asserts `identity ==
   {"name": null, "role": null}` and the own stream is flagged (spec:
   `reference` tool)
-- [ ] 5.2 Implement `client/client.py` `scores()` (joins `learning/get_scores`
+- [x] 5.2 Implement `client/client.py` `scores()` (joins `learning/get_scores`
   to `learning/get_studies` by `study_id`, applies the
   `SCORE_STATUS_LABELS = {1: "in progress", 2: "in progress", 5:
   "completed"}` map, degrades an unresolved `study_id` to id + name-not-found
