@@ -10,32 +10,67 @@ By default this prints the bare {command, args, env} object. Pass
   --host claude-desktop  wrapped as {"mcpServers": {"forlabs": ...}}
   --host claude-code     a ready `claude mcp add-json forlabs '...'` command
 
+If `scripts/setup_config.py` has already saved a username and password
+to the local TOML config file, the "env" block is left out entirely -
+the server will pick the credentials up from that file at runtime, so
+there is nothing left to type into the pasted command. Otherwise "env"
+carries placeholder credential fields - never real values, even if
+FORLABS_USERNAME/FORLABS_PASSWORD happen to be set in the environment
+this script runs in - the user fills them in themselves (or runs
+setup_config.py instead).
+
 Dependency-free by design: only the standard library, so it runs even
-before `uv sync` has been done. Credential fields are always
-placeholders - never real values, even if FORLABS_USERNAME/
-FORLABS_PASSWORD happen to be set in the environment this script runs
-in - the user fills them in themselves.
+before `uv sync` has been done.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
+import tomllib
 from pathlib import Path
 
 _HOSTS = ("raw", "claude-desktop", "claude-code")
+_DEFAULT_CONFIG_FILE = "~/.config/forlabs-mcp/config.toml"
+
+
+def _config_file_path() -> Path:
+    override = os.environ.get("FORLABS_MCP_CONFIG")
+    if override:
+        return Path(override).expanduser()
+    return Path(_DEFAULT_CONFIG_FILE).expanduser()
+
+
+def has_saved_credentials() -> bool:
+    """True if the local TOML config file already has a non-empty
+    username and password (typically written by scripts/setup_config.py)."""
+    path = _config_file_path()
+    if not path.is_file():
+        return False
+    try:
+        with path.open("rb") as fh:
+            data = tomllib.load(fh)
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    table = data.get("forlabs", data)
+    if not isinstance(table, dict):
+        return False
+    return bool(table.get("username")) and bool(table.get("password"))
 
 
 def build_config() -> dict:
     repo_root = Path(__file__).resolve().parent.parent
-    return {
+    config: dict = {
         "command": "uv",
         "args": ["--directory", str(repo_root), "run", "forlabs-mcp"],
-        "env": {
+    }
+    if not has_saved_credentials():
+        config["env"] = {
             "FORLABS_USERNAME": "your.login",
             "FORLABS_PASSWORD": "your-password",
-        },
-    }
+        }
+    return config
 
 
 def render(host: str) -> str:
