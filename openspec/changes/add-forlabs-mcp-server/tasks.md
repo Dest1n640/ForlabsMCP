@@ -35,7 +35,7 @@
 
 ## 3. Session and repository layer
 
-- [ ] 3.1 Implement `client/session.py` (`ForlabsSession`: one `httpx.Client`,
+- [x] 3.1 Implement `client/session.py` (`ForlabsSession`: one `httpx.Client`,
   `GET /app/login` to prime the `XSRF-TOKEN` cookie, `POST /app/login` with
   the URL-decoded token in `X-XSRF-TOKEN`, cookie jar persisted to
   `session_path` at mode `0600`) and verify `respx`-mocked tests cover
