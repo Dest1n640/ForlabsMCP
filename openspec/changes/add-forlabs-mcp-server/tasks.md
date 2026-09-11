@@ -133,7 +133,7 @@
   `--directory` and never embeds the real `FORLABS_USERNAME`/
   `FORLABS_PASSWORD` values even when they are set in the environment
   (spec: Portable MCP client registration)
-- [ ] 7.2 Write `README.md` covering setup, configuration precedence, and
+- [x] 7.2 Write `README.md` covering setup, configuration precedence, and
   how to hand `scripts/print_mcp_config.py`'s output to Claude Desktop,
   Claude Code (`claude mcp add-json`), and Hermes Agent, and verify the
   documented commands are copy-pasteable (no unresolved placeholders beyond
