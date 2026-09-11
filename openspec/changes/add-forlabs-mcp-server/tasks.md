@@ -64,7 +64,7 @@
   `TaskFile`, `Assignment`, `Identity`, using the backend-key mapping in
   reference §5) and verify a unit test constructs each model from its
   fixture and asserts an unexpected extra field does not raise
-- [ ] 4.2 Implement `client/parsers.py` (tolerant `payload -> model`
+- [x] 4.2 Implement `client/parsers.py` (tolerant `payload -> model`
   functions returning `PartialResult`) and verify a unit test feeds one
   malformed row alongside valid rows from a fixture and asserts the
   malformed row becomes a warning while valid rows are still returned
