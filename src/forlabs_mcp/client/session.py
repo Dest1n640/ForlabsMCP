@@ -17,6 +17,11 @@ from ..errors import TimeoutError as ForlabsTimeoutError
 
 _LOGIN_PATH = "/app/login"
 
+# The backend's exact "session expired" response shape was never captured
+# live; 401/419 (Laravel's usual expired-session/CSRF-mismatch code) is the
+# best-effort detection this client uses until a real expiry is captured.
+_SESSION_EXPIRED_STATUSES = frozenset({401, 419})
+
 
 class ForlabsSession:
     """Holds one httpx.Client and the Forlabs login/session lifecycle."""
@@ -72,8 +77,23 @@ class ForlabsSession:
         self._persist_session()
 
     def request(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
-        """Make an authenticated request, logging in first if necessary."""
+        """Make an authenticated request.
+
+        Logs in first if not yet authenticated. If the response indicates
+        the session has expired, logs in again and retries the request
+        exactly once; if that retry also indicates an expired session,
+        raises AuthError rather than retrying further.
+        """
         self.ensure_authenticated()
+        response = self._authenticated_send(method, path, json_body)
+        if response.status_code in _SESSION_EXPIRED_STATUSES:
+            self.login()
+            response = self._authenticated_send(method, path, json_body)
+            if response.status_code in _SESSION_EXPIRED_STATUSES:
+                raise AuthError("Forlabs session re-authentication failed.")
+        return response
+
+    def _authenticated_send(self, method: str, path: str, json_body: dict | None) -> httpx.Response:
         token = self._xsrf_token()
         return self._send(
             method,

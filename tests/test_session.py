@@ -95,3 +95,55 @@ def test_persisted_session_is_restored_without_relogging_in(tmp_path) -> None:
     second_session = ForlabsSession(config)
 
     assert second_session.is_authenticated is True
+
+
+@respx.mock
+def test_expired_session_is_relogged_in_and_retried_once(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    login_post = respx.post(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(
+            200, json={}, headers=[("set-cookie", "forlabs_session=xyz123; Path=/")]
+        )
+    )
+    data_endpoint = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        side_effect=[
+            httpx.Response(419, json={"message": "session expired"}),
+            httpx.Response(200, json={"grid": {}}),
+        ]
+    )
+
+    session = ForlabsSession(_config(tmp_path))
+    response = session.request("POST", "/lm-vendor/repositories/sched/get_grid", {})
+
+    assert response.status_code == 200
+    assert response.json() == {"grid": {}}
+    assert data_endpoint.call_count == 2
+    assert login_post.call_count == 2
+
+
+@respx.mock
+def test_reauth_failure_surfaces_auth_error(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    respx.post(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(
+            200, json={}, headers=[("set-cookie", "forlabs_session=xyz123; Path=/")]
+        )
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        side_effect=[
+            httpx.Response(419, json={"message": "session expired"}),
+            httpx.Response(419, json={"message": "session expired"}),
+        ]
+    )
+
+    session = ForlabsSession(_config(tmp_path))
+
+    try:
+        session.request("POST", "/lm-vendor/repositories/sched/get_grid", {})
+        raise AssertionError("expected AuthError")
+    except AuthError:
+        pass
