@@ -29,7 +29,7 @@
   a classified, single-line, credential-free message, and verify unit tests
   cover an unrecognized exception collapsing to a generic message (spec:
   Credential-free, classified error surface)
-- [ ] 2.3 Implement `client/partial.py` (`PartialResult[T]`: `data` +
+- [x] 2.3 Implement `client/partial.py` (`PartialResult[T]`: `data` +
   `warnings` + `is_partial`) and verify unit tests cover constructing a
   result from mixed successful/failed rows
 
