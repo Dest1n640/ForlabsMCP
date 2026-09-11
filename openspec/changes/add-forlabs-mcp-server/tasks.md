@@ -141,7 +141,7 @@
 
 ## 8. Privacy guardrail and full test suite
 
-- [ ] 8.1 Implement `tests/test_repo_privacy.py` scanning `git ls-files`
+- [x] 8.1 Implement `tests/test_repo_privacy.py` scanning `git ls-files`
   output for `tests/fixtures/*.json` and `docs/*.md` against a Title-Case-
   Cyrillic name-shaped regex (excluding a maintained synthetic-name
   allow-list) and absolute `/Users/<name>` or `/home/<name>` paths, and
