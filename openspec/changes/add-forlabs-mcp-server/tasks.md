@@ -126,7 +126,7 @@
 
 ## 7. Registration tooling and docs
 
-- [ ] 7.1 Implement `scripts/print_mcp_config.py` (resolves its own repo
+- [x] 7.1 Implement `scripts/print_mcp_config.py` (resolves its own repo
   path at runtime, prints the `{command, args, env}` object with credential
   fields always left as placeholders) and verify running it from a
   different working directory still prints a correct absolute
