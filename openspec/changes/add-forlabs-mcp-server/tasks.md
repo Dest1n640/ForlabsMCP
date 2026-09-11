@@ -110,7 +110,7 @@
 
 ## 6. MCP tool registration and server entry point
 
-- [ ] 6.1 Implement `tools/register.py` registering the four tools
+- [x] 6.1 Implement `tools/register.py` registering the four tools
   (`reference`, `grades`, `homework`, `schedule`) with the JSON output
   shapes in reference §6, validating arguments before calling the client,
   and converting any `ForlabsError` to `to_tool_error()`'s classified
