@@ -85,7 +85,9 @@ uv run python scripts/print_mcp_config.py
 ```
 
 Это выведет (поля с кредами всегда плейсхолдеры — впишите свои
-логин/пароль после того, как вставите результат):
+логин/пароль после того, как вставите результат). Для Claude Desktop и
+Claude Code скрипт умеет сразу печатать готовую под них форму — см.
+`--host claude-desktop` / `--host claude-code` ниже.
 
 ```json
 {
@@ -100,8 +102,12 @@ uv run python scripts/print_mcp_config.py
 
 ### Claude Desktop
 
-Вставьте объект в `claude_desktop_config.json`, в раздел
-`mcpServers.forlabs`:
+```bash
+uv run python scripts/print_mcp_config.py --host claude-desktop
+```
+
+Это сразу выведет готовый блок — просто вставьте его в
+`claude_desktop_config.json`:
 
 ```json
 {
@@ -119,6 +125,13 @@ uv run python scripts/print_mcp_config.py
 ```
 
 ### Claude Code
+
+```bash
+uv run python scripts/print_mcp_config.py --host claude-code
+```
+
+Это выведет уже готовую к запуску команду — скопируйте и выполните её
+целиком:
 
 ```bash
 claude mcp add-json forlabs '{"command":"uv","args":["--directory","<абсолютный-путь-к-этому-репозиторию>","run","forlabs-mcp"],"env":{"FORLABS_USERNAME":"your.login","FORLABS_PASSWORD":"your-password"}}'
