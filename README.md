@@ -23,7 +23,7 @@ Forlabs. Единственный файл, который сервер пише
 ## Установка
 
 ```bash
-git clone <ссылка-на-этот-репозиторий>
+git clone https://github.com/Dest1n640/ForlabsMCP.git
 cd forlabs-mcp
 uv sync
 ```
