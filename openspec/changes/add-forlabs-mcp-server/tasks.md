@@ -80,7 +80,7 @@
 
 ## 5. Domain client
 
-- [ ] 5.1 Implement `client/client.py` `reference()` (discovers own stream
+- [x] 5.1 Implement `client/client.py` `reference()` (discovers own stream
   from `sched/get_schedule`'s `meta.stream_ids`, returns identity
   placeholder + streams + full `learning/get_studies` history) and verify a
   `respx`-mocked test using the fixtures asserts `identity ==
