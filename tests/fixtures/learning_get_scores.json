@@ -1,0 +1,13 @@
+{
+  "scores": {
+    "8919": { "study_id": 8919, "credits": 1, "status": 1, "grade": 0 },
+    "8975": { "study_id": 8975, "credits": 93.56, "status": 5, "grade": 0 },
+    "8983": { "study_id": 8983, "credits": 76.98, "status": 2, "grade": 0 },
+    "8982": { "study_id": 8982, "credits": 100.9, "status": 5, "grade": 0 },
+    "9480": { "study_id": 9480, "credits": 60, "status": 1, "grade": 0 },
+    "9952": { "study_id": 9952, "credits": 100, "status": 5, "grade": 0 },
+    "10412": { "study_id": 10412, "credits": 119.08, "status": 5, "grade": 0 },
+    "11616": { "study_id": 11616, "credits": 1.2, "status": 1, "grade": 0 },
+    "11584": { "study_id": 11584, "credits": 0.3, "status": 1, "grade": 0 }
+  }
+}

@@ -1,0 +1,112 @@
+{
+  "tasks": [
+    {
+      "id": 5,
+      "name": "Создание отчёта по таблице",
+      "content": "<p>Подготовительный этап: установите MySQL, импортируйте customers.sql, составьте запросы.</p>",
+      "type": 1,
+      "course_id": 3,
+      "chapter_id": 3,
+      "chapter_title": "Запросы на выборку данных",
+      "chapter_has_content": true,
+      "level": 10,
+      "files": [
+        {
+          "id": 6677,
+          "type": "text",
+          "filename": "customers.sql",
+          "mime_type": "text/plain",
+          "size": 22181,
+          "url": "https://bki.matecdn.ru/-/a1b2c3d4-1111-2222-3333-444455556666/customers.sql",
+          "human_size": "21,66 КБ"
+        }
+      ],
+      "pivot_status": 3,
+      "pivot_cost": 2,
+      "pivot_sort": 1,
+      "pivot_type": 1,
+      "pivot_start_at": null,
+      "pivot_end_at": "2026-03-02T16:00:00.000000Z",
+      "pivot_description": null
+    },
+    {
+      "id": 251,
+      "name": "Форматы хранения данных",
+      "content": "<ol><li>Составьте список песен, фильмов, книг.</li></ol>",
+      "type": 1,
+      "course_id": 3,
+      "chapter_id": 2,
+      "chapter_title": "Управление таблицами и форматами данных",
+      "chapter_has_content": true,
+      "level": 10,
+      "files": [],
+      "pivot_status": 3,
+      "pivot_cost": 2,
+      "pivot_sort": 2,
+      "pivot_type": 1,
+      "pivot_start_at": null,
+      "pivot_end_at": "2026-03-11T16:00:00.000000Z",
+      "pivot_description": null
+    },
+    {
+      "id": 41,
+      "name": "Курсовой проект по БД",
+      "content": "<p>Выберите тематику и спроектируйте базу данных.</p>",
+      "type": 1,
+      "course_id": 3,
+      "chapter_id": null,
+      "chapter_title": null,
+      "chapter_has_content": false,
+      "level": 10,
+      "files": [],
+      "pivot_status": 3,
+      "pivot_cost": 10,
+      "pivot_sort": 12,
+      "pivot_type": 1,
+      "pivot_start_at": null,
+      "pivot_end_at": null,
+      "pivot_description": null
+    }
+  ],
+  "assignments": [
+    {
+      "id": 940203,
+      "task_id": 5,
+      "status": 3,
+      "choice": null,
+      "variant": null,
+      "options": null,
+      "last_replied_at": "2026-02-18 11:02:38",
+      "assessment_credits": 2,
+      "assessment_date": "2026-03-12",
+      "assessment_lecturer_id": 45,
+      "responses_count": 1
+    },
+    {
+      "id": 947033,
+      "task_id": 251,
+      "status": 3,
+      "choice": null,
+      "variant": null,
+      "options": null,
+      "last_replied_at": "2026-03-02 22:19:21",
+      "assessment_credits": 2,
+      "assessment_date": "2026-03-12",
+      "assessment_lecturer_id": 45,
+      "responses_count": 1
+    },
+    {
+      "id": 987307,
+      "task_id": 41,
+      "status": 3,
+      "choice": null,
+      "variant": null,
+      "options": null,
+      "last_replied_at": "2026-06-07 16:53:59",
+      "assessment_credits": 9,
+      "assessment_date": "2026-06-10",
+      "assessment_lecturer_id": 45,
+      "responses_count": 2
+    }
+  ]
+}

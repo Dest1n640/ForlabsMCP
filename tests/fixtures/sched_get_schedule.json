@@ -1,0 +1,77 @@
+{
+  "meta": { "type": "stream", "is_own": true, "stream_ids": [205] },
+  "streams": [
+    { "id": 199, "name": "14321-ДБ (ПИ)" },
+    { "id": 200, "name": "14322-ДБ (ПИ)" },
+    { "id": 205, "name": "14323-ДБ (ПИ)" },
+    { "id": 206, "name": "14324-ДБ (ПИ)" }
+  ],
+  "entries": [
+    {
+      "day": 1,
+      "position": 2,
+      "type": 1,
+      "room_name": "ауд. 149",
+      "lecturer_name": "Кравцова Наталья Игоревна",
+      "study_id": 11590,
+      "study_name": "Экономическая теория",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    },
+    {
+      "day": 1,
+      "position": 3,
+      "type": 1,
+      "room_name": "НБУ 303",
+      "lecturer_name": "Тихонов Максим Олегович",
+      "study_id": 11589,
+      "study_name": "Интеллектуальные системы и анализ больших данных",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    },
+    {
+      "day": 2,
+      "position": 2,
+      "type": 2,
+      "room_name": "НБУ 303",
+      "lecturer_name": "Голубев Артём Николаевич",
+      "study_id": 11593,
+      "study_name": "Архитектура вычислительных комплексов",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    },
+    {
+      "day": 4,
+      "position": 4,
+      "type": 2,
+      "room_name": "Онлайн",
+      "lecturer_name": "Ковалёва Т. А.",
+      "study_id": 11596,
+      "study_name": "Отечественная история",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    },
+    {
+      "day": 8,
+      "position": 2,
+      "type": 2,
+      "room_name": "НБУ 104",
+      "lecturer_name": "Тихонов Максим Олегович",
+      "study_id": 11589,
+      "study_name": "Интеллектуальные системы и анализ больших данных",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    },
+    {
+      "day": 12,
+      "position": 1,
+      "type": 2,
+      "room_name": "НБУ 110",
+      "lecturer_name": "Семёнов Владимир Игоревич",
+      "study_id": 11597,
+      "study_name": "Формальные языки и трансляции",
+      "subgroup": "",
+      "streams": [{ "id": 205, "name": "14323-ДБ (ПИ)" }]
+    }
+  ]
+}

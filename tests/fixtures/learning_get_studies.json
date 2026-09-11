@@ -1,0 +1,104 @@
+{
+  "studies": [
+    {
+      "id": 11584,
+      "stream_id": null,
+      "subject_id": null,
+      "course_id": 5,
+      "semester": 305,
+      "curr_year": 3,
+      "curr_sem": 5,
+      "status": 2,
+      "verbose_name": "Технологии интерактивных медиасистем",
+      "short_name": null,
+      "type": 1,
+      "year_id": 20,
+      "year_name": "2026/2027",
+      "session": 1,
+      "lecturers": [
+        { "id": 45, "department_id": 5, "verbose_name": "Орлов Пётр Андреевич", "title": "старший преподаватель", "role": 1 }
+      ],
+      "lecturers_count": 1,
+      "posts_count": 0,
+      "chapters_count": 0,
+      "tasks_count": 1,
+      "exams_count": 0,
+      "attendance_count": 1
+    },
+    {
+      "id": 11590,
+      "stream_id": null,
+      "subject_id": null,
+      "course_id": 360,
+      "semester": 305,
+      "curr_year": 3,
+      "curr_sem": 5,
+      "status": 2,
+      "verbose_name": "Экономическая теория",
+      "short_name": null,
+      "type": 1,
+      "year_id": 20,
+      "year_name": "2026/2027",
+      "session": 1,
+      "lecturers": [
+        { "id": 38, "department_id": 4, "verbose_name": "Кравцова Наталья Игоревна", "title": "к.т.н., доцент", "role": 1 }
+      ],
+      "lecturers_count": 1,
+      "posts_count": 0,
+      "chapters_count": 0,
+      "tasks_count": 0,
+      "exams_count": 0,
+      "attendance_count": 0
+    },
+    {
+      "id": 10823,
+      "stream_id": null,
+      "subject_id": null,
+      "course_id": 3,
+      "semester": 204,
+      "curr_year": 2,
+      "curr_sem": 4,
+      "status": 3,
+      "verbose_name": "Управление базами данных",
+      "short_name": null,
+      "type": 1,
+      "year_id": 19,
+      "year_name": "2025/2026",
+      "session": 2,
+      "lecturers": [
+        { "id": 45, "department_id": 5, "verbose_name": "Орлов Пётр Андреевич", "title": "старший преподаватель", "role": 1 }
+      ],
+      "lecturers_count": 1,
+      "posts_count": 0,
+      "chapters_count": 13,
+      "tasks_count": 12,
+      "exams_count": 6,
+      "attendance_count": 26
+    },
+    {
+      "id": 8975,
+      "stream_id": null,
+      "subject_id": null,
+      "course_id": 940,
+      "semester": 101,
+      "curr_year": 1,
+      "curr_sem": 1,
+      "status": 3,
+      "verbose_name": "Основы государственного управления",
+      "short_name": null,
+      "type": 1,
+      "year_id": 18,
+      "year_name": "2024/2025",
+      "session": 1,
+      "lecturers": [
+        { "id": 3, "department_id": 1, "verbose_name": "Фомина Ольга Викторовна", "title": "", "role": 1 }
+      ],
+      "lecturers_count": 1,
+      "posts_count": 0,
+      "chapters_count": 4,
+      "tasks_count": 2,
+      "exams_count": 1,
+      "attendance_count": 5
+    }
+  ]
+}
