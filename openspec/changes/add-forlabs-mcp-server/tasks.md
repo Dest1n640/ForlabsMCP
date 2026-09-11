@@ -151,5 +151,5 @@
 - [x] 8.2 Run the full suite and verify `uv run pytest` passes with zero
   live network calls (no `FORLABS_USERNAME`/`FORLABS_PASSWORD` set in the
   test environment)
-- [ ] 8.3 Verify `uv run ruff check .` and `uv run ruff format --check .`
+- [x] 8.3 Verify `uv run ruff check .` and `uv run ruff format --check .`
   both pass with zero findings across the full implementation
