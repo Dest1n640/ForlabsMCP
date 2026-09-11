@@ -17,7 +17,7 @@
 
 ## 2. Configuration and error taxonomy
 
-- [ ] 2.1 Implement `config.py` (`ForlabsConfig` dataclass, `load_config()`
+- [x] 2.1 Implement `config.py` (`ForlabsConfig` dataclass, `load_config()`
   with env var > TOML file > default precedence per reference §7,
   `redacted()` for safe logging) and verify unit tests cover: env override
   of TOML, missing-credential failure, and that `redacted()` never contains
