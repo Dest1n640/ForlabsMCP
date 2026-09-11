@@ -42,7 +42,7 @@
   successful login and a rejected-credentials `422` mapping to `AuthError`
   without the password appearing in the exception message (spec: Session
   authentication, Local session cache confidentiality)
-- [ ] 3.2 Add transparent re-auth-once behavior to `ForlabsSession` and
+- [x] 3.2 Add transparent re-auth-once behavior to `ForlabsSession` and
   verify a `respx`-mocked test covers: first data call fails as expired,
   session re-logs in, retried call succeeds; and a second test covers
   re-auth itself failing and surfacing `AuthError` (spec: Transparent
