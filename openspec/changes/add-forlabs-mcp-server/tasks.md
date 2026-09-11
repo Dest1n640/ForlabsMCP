@@ -118,7 +118,7 @@
   dispatch) calls each of the four tools once and asserts the top-level
   response keys match reference §6 (spec: Read-only tool surface, all four
   tool-contract requirements)
-- [ ] 6.2 Implement `server.py` (CLI entry point `forlabs-mcp`, builds the
+- [x] 6.2 Implement `server.py` (CLI entry point `forlabs-mcp`, builds the
   MCP server with a lazily-created `ForlabsClient` via a client factory, runs
   stdio transport) and verify `uv run forlabs-mcp --help` (or the
   equivalent no-network smoke invocation) starts without requiring a live
