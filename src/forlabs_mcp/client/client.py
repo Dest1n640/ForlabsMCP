@@ -10,9 +10,18 @@ from __future__ import annotations
 from typing import Any
 
 from ..config import ForlabsConfig
+from ..dates import PlacedLesson, resolve_lessons, resolve_range
 from ..errors import ForlabsError
 from .models import Identity, Stream, Study, TaskFile
-from .parsers import parse_assignments, parse_scores, parse_streams, parse_studies, parse_tasks
+from .parsers import (
+    parse_assignments,
+    parse_lessons,
+    parse_schedule_grid,
+    parse_scores,
+    parse_streams,
+    parse_studies,
+    parse_tasks,
+)
 from .partial import PartialResult, combine
 from .repository import Repository
 from .session import ForlabsSession
@@ -32,6 +41,23 @@ def _task_file_to_dict(task_file: TaskFile) -> dict[str, Any]:
         "url": task_file.url,
         "size": task_file.size,
         "human_size": task_file.human_size,
+    }
+
+
+def _placed_lesson_to_dict(placed: PlacedLesson) -> dict[str, Any]:
+    lesson = placed.lesson
+    return {
+        "date": placed.date.isoformat(),
+        "weekday": placed.weekday,
+        "start": placed.start,
+        "end": placed.end,
+        "position": lesson.position,
+        "subject": lesson.study_name,
+        "study_id": lesson.study_id,
+        "kind": lesson.kind,
+        "teacher": lesson.lecturer_name,
+        "room": lesson.room_name,
+        "subgroup": lesson.subgroup,
     }
 
 
@@ -213,3 +239,38 @@ class ForlabsClient:
                 }
             )
         return PartialResult(data=rows, warnings=warnings)
+
+    def schedule_raw(
+        self, date: str | None = None, start: str | None = None, end: str | None = None
+    ) -> dict[str, Any]:
+        # Raises InvalidArgumentError before any backend call if date and
+        # start/end are both given.
+        range_start, range_end = resolve_range(date=date, start=start, end=end)
+
+        warnings: list[str] = []
+
+        grid_payload = self._repository.call("sched", "get_grid", {})
+        raw_grid = grid_payload.get("grid", {}) if isinstance(grid_payload, dict) else {}
+        grid = parse_schedule_grid(raw_grid)
+
+        schedule_payload = self._repository.call("sched", "get_schedule", {})
+        raw_entries = (
+            schedule_payload.get("entries", []) if isinstance(schedule_payload, dict) else []
+        )
+        lessons_result = parse_lessons(raw_entries)
+        warnings.extend(lessons_result.warnings)
+
+        resolved = resolve_lessons(lessons_result.data, grid, range_start, range_end)
+        lessons = [_placed_lesson_to_dict(placed) for placed in resolved.lessons]
+
+        result: dict[str, Any] = {
+            "range": f"{range_start.isoformat()} - {range_end.isoformat()}",
+            "timezone": self._config.timezone,
+            "week_variants": grid.week_variants,
+            "week_parity_basis": resolved.week_parity_basis,
+            "lessons": lessons,
+            "warnings": warnings,
+        }
+        if not lessons:
+            result["note"] = "No lessons found for the given range."
+        return result

@@ -101,7 +101,7 @@
   and verify unit tests cover: multi-study union, one failing study
   producing a warning without failing the call, and `only_outstanding`
   filtering (spec: `homework` tool)
-- [ ] 5.4 Implement `client/client.py` `schedule_raw()` (fetches grid +
+- [x] 5.4 Implement `client/client.py` `schedule_raw()` (fetches grid +
   schedule, validates `date` is mutually exclusive with `start`/`end` before
   any backend call, delegates placement to `dates.py`, adds a "no lessons"
   note on empty results) and verify unit tests cover the mutual-exclusion

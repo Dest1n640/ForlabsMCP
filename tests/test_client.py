@@ -2,10 +2,12 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 
 from forlabs_mcp.client.client import ForlabsClient
 from forlabs_mcp.config import ForlabsConfig
+from forlabs_mcp.errors import InvalidArgumentError
 
 BASE_URL = "https://bki.forlabs.ru"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -313,4 +315,62 @@ def test_homework_with_no_results_returns_note(tmp_path) -> None:
     result = client.homework(stream_id=205, study_id=999)
 
     assert result["homework"] == []
+    assert "note" in result
+
+
+@respx.mock(assert_all_called=False)
+def test_schedule_raw_mutual_exclusion_rejects_without_any_backend_call(tmp_path) -> None:
+    client = ForlabsClient(_config(tmp_path))
+
+    with pytest.raises(InvalidArgumentError):
+        client.schedule_raw(date="2026-03-02", start="2026-03-02", end="2026-03-08")
+
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_schedule_raw_places_lessons_and_reports_week_parity_basis(tmp_path) -> None:
+    _mock_login_success()
+    grid_fixture = _load("sched_get_grid.json")
+    schedule_fixture = _load("sched_get_schedule.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        return_value=httpx.Response(200, json=grid_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json=schedule_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    result = client.schedule_raw(start="2026-03-02", end="2026-03-15")
+
+    assert len(result["lessons"]) == len(schedule_fixture["entries"])
+    assert result["week_variants"] == 2
+    assert "week_index" in result["week_parity_basis"]
+    assert result["timezone"] == "Asia/Irkutsk"
+    assert result["warnings"] == []
+    assert "note" not in result
+
+    lesson = next(item for item in result["lessons"] if item["study_id"] == 11590)
+    assert lesson["subject"] == "Экономическая теория"
+    assert lesson["start"] == "10:10"
+    assert lesson["weekday"] == 0
+
+
+@respx.mock
+def test_schedule_raw_empty_range_returns_note(tmp_path) -> None:
+    _mock_login_success()
+    grid_fixture = _load("sched_get_grid.json")
+    schedule_fixture = _load("sched_get_schedule.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        return_value=httpx.Response(200, json=grid_fixture)
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json=schedule_fixture)
+    )
+
+    client = ForlabsClient(_config(tmp_path))
+    # 2026-03-08 is a Sunday; no fixture entry has that weekday.
+    result = client.schedule_raw(date="2026-03-08")
+
+    assert result["lessons"] == []
     assert "note" in result
