@@ -22,7 +22,7 @@
   `redacted()` for safe logging) and verify unit tests cover: env override
   of TOML, missing-credential failure, and that `redacted()` never contains
   the password (spec: Layered, validated configuration)
-- [ ] 2.2 Implement `errors.py` (`ForlabsError` base and the eight
+- [x] 2.2 Implement `errors.py` (`ForlabsError` base and the eight
   subclasses in reference §8: `ConfigError`, `InvalidArgumentError`,
   `AuthError`, `ConnectivityError`, `TimeoutError`, `RateLimitError`,
   `UpstreamError`, `ProgrammingError`) with `to_tool_error()` mapping each to
