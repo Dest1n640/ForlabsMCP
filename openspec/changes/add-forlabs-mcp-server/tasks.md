@@ -148,7 +148,7 @@
   verify it passes against the current tracked fixtures and fails when a
   temporary test file with a real-looking name is added to the allow-list
   check (removed after verifying the failure path)
-- [ ] 8.2 Run the full suite and verify `uv run pytest` passes with zero
+- [x] 8.2 Run the full suite and verify `uv run pytest` passes with zero
   live network calls (no `FORLABS_USERNAME`/`FORLABS_PASSWORD` set in the
   test environment)
 - [ ] 8.3 Verify `uv run ruff check .` and `uv run ruff format --check .`
