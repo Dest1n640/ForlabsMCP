@@ -59,7 +59,7 @@
 
 ## 4. Models, parsing, and date resolution
 
-- [ ] 4.1 Implement `client/models.py` (pydantic models with `extra="ignore"`
+- [x] 4.1 Implement `client/models.py` (pydantic models with `extra="ignore"`
   for `Stream`, `Study`, `ScheduleGrid`, `Lesson`, `Score`, `Task`,
   `TaskFile`, `Assignment`, `Identity`, using the backend-key mapping in
   reference §5) and verify a unit test constructs each model from its
