@@ -47,7 +47,7 @@
   session re-logs in, retried call succeeds; and a second test covers
   re-auth itself failing and surfacing `AuthError` (spec: Transparent
   re-authentication on session expiry)
-- [ ] 3.3 Implement `client/repository.py` (`Repository.call(module, action,
+- [x] 3.3 Implement `client/repository.py` (`Repository.call(module, action,
   params)` posting to `/lm-vendor/repositories/<module>/<action>`, checking
   the six-action allow-list from reference §2.4 before constructing any
   request, raising `UpstreamError` for a non-2xx status or a body shaped
