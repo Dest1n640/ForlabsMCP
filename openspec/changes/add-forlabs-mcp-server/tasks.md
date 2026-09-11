@@ -93,7 +93,7 @@
   note, adds a "no grades found" note on empty results) and verify unit
   tests cover a resolved score, an unresolved `study_id`, and an empty-result
   note (spec: `grades` tool)
-- [ ] 5.3 Implement `client/client.py` `homework()` (loops
+- [x] 5.3 Implement `client/client.py` `homework()` (loops
   `learning/get_tasks` per study when `study_id` is omitted, passing
   `stream_id`/`study_id` as strings per reference §3, unions results,
   converts one study's failure into a warning via `PartialResult`, derives
