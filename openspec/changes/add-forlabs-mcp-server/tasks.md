@@ -69,7 +69,7 @@
   malformed row alongside valid rows from a fixture and asserts the
   malformed row becomes a warning while valid rows are still returned
   (spec: Partial results on malformed data)
-- [ ] 4.3 Implement `dates.py` (`resolve_range()` for `YYYY-MM-DD` parsing,
+- [x] 4.3 Implement `dates.py` (`resolve_range()` for `YYYY-MM-DD` parsing,
   inclusive ranges, and the current-ISO-week default; `resolve_lessons()`
   placing `day`/`position` entries onto calendar dates via the grid, and
   computing `week_parity_basis = (ISO week number - 1) % week_variants`)
