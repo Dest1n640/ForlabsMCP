@@ -123,6 +123,19 @@ def test_expired_session_is_relogged_in_and_retried_once(tmp_path) -> None:
     assert login_post.call_count == 2
 
 
+def test_malformed_session_file_is_ignored_instead_of_crashing(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.session_path.parent.mkdir(parents=True, exist_ok=True)
+    config.session_path.write_text(
+        '{"cookies": [{"name": "forlabs_session", "value": "xyz", "domain": ".forlabs.ru", '
+        '"path": "/", "expires": null, "httpOnly": true}]}'
+    )
+
+    session = ForlabsSession(config)
+
+    assert session.is_authenticated is False
+
+
 @respx.mock
 def test_reauth_failure_surfaces_auth_error(tmp_path) -> None:
     respx.get(f"{BASE_URL}/app/login").mock(

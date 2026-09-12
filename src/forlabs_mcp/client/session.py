@@ -7,7 +7,7 @@ See PROJECT-REFERENCE.md §2.1-2.2 for the captured login flow this mirrors.
 from __future__ import annotations
 
 import json
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 import httpx
 
@@ -103,7 +103,14 @@ class ForlabsSession:
         )
 
     def _xsrf_token(self) -> str | None:
-        raw = self._client.cookies.get("XSRF-TOKEN")
+        try:
+            raw = self._client.cookies.get("XSRF-TOKEN")
+        except httpx.CookieConflict:
+            # A domain-less cookie restored from the session cache can
+            # coexist with a domain-qualified one the server just set.
+            # Prefer the most recently set match rather than failing.
+            matches = [c for c in self._client.cookies.jar if c.name == "XSRF-TOKEN"]
+            raw = matches[-1].value if matches else None
         return unquote(raw) if raw else None
 
     def _send(
@@ -139,8 +146,19 @@ class ForlabsSession:
             payload = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError):
             return
+        if not isinstance(payload, dict):
+            return
         cookies = payload.get("cookies", {})
+        if not isinstance(cookies, dict):
+            return
+        domain = urlparse(self._config.base_url).hostname or ""
         for name, value in cookies.items():
-            self._client.cookies.set(name, value)
+            if not isinstance(name, str) or not isinstance(value, str):
+                return
+            # Set with the server's own domain so a later Set-Cookie for the
+            # same name updates this entry instead of coexisting with it
+            # (two same-name cookies on different domains make Cookies.get()
+            # raise CookieConflict).
+            self._client.cookies.set(name, value, domain=domain)
         if "forlabs_session" in cookies:
             self._authenticated = True
