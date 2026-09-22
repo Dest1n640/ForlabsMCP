@@ -27,7 +27,7 @@ server writes locally is a session-cookie cache (mode `0600`).
 - **Session**: cookie-based, established by the login form. Session cookie
   name: **`forlabs_session`**.
 
-### 2.2 Login flow (confirmed from a captured request)
+### 2.2 Login flow (confirmed from a captured request) — historical, not used by this client
 
 ```
 POST https://bki.forlabs.ru/app/login
@@ -48,6 +48,52 @@ Cookie: XSRF-TOKEN=…; forlabs_session=…
   email.
 - First hit `GET /app/login` once to prime the `XSRF-TOKEN` cookie (Laravel
   sets it on any GET in the web middleware group) before posting.
+- **This POST is documented for completeness only — `forlabs-mcp` never
+  submits it.** The client authenticates by seeding a pre-existing
+  long-lived cookie instead (§2.2a); this flow is how a real browser login
+  originally obtains that cookie.
+
+### 2.2a Cookie lifetimes and remember-me auth (confirmed live, this is what the client actually uses)
+
+A real login was captured and its resulting cookies inspected directly
+(not just read from a request log):
+
+| Cookie | Domain | Measured lifetime |
+|---|---|---|
+| `XSRF-TOKEN` | `bki.forlabs.ru` | ~2.4 hours |
+| `forlabs_session` | `bki.forlabs.ru` | ~2.4 hours |
+| `remember_lm_<hash>` | `bki.forlabs.ru` | ~5 years (~1825 days) |
+
+The `<hash>` suffix is a Laravel `Auth::viaRemember()` guard identifier
+fixed by this application's own configuration — the same for every account
+on this deployment, not derived per user. `forlabs-mcp` hardcodes the full
+observed cookie name as `REMEMBER_COOKIE_NAME` in `client/session.py`.
+
+A follow-up live test confirmed the mechanism `forlabs-mcp` relies on: a
+request carrying **only** `remember_lm_<hash>` (no `forlabs_session`, just
+a freshly primed `XSRF-TOKEN` from `GET /app/login`) against
+`POST /lm-vendor/repositories/sched/get_schedule` returned `200` with real
+data, and the response's `Set-Cookie` headers minted a fresh
+`forlabs_session`. This is standard Laravel remember-me behavior operating
+transparently on an ordinary authenticated request — no special keep-alive
+call, endpoint, or timing is needed to trigger it.
+
+**Practical consequence**: the user obtains the `remember_lm_<hash>` value
+once from their own browser (DevTools → Application/Storage → Cookies →
+`bki.forlabs.ru` — it is `HttpOnly` so it never appears via
+`document.cookie`, but DevTools' cookie list shows it regardless) and
+configures it as `session_token` (see §7). `forlabs-mcp` seeds it into its
+cookie jar at startup and never submits a username or password anywhere.
+Ordinary data calls renew the short-lived `forlabs_session`/`XSRF-TOKEN`
+pair as a side effect. If a call ever comes back `401`/`419` it means the
+`remember_lm_<hash>` value itself was rejected (not just the short
+session) — treat this as a rare, ~5-year-horizon event requiring a fresh
+value from the browser, not a routine retry.
+
+A leaked `remember_lm_<hash>` value grants the same practical account
+access as a leaked password, for its full measured lifetime — it is not
+inherently safer to store, it just means this client itself never
+transmits or holds the raw password.
 
 ### 2.3 Repository RPC envelope
 
@@ -634,8 +680,7 @@ Precedence: **environment variable > TOML file > built-in default.**
 
 | Setting | Env var | Default | Required |
 |---|---|---|---|
-| Username | `FORLABS_USERNAME` | — | yes |
-| Password | `FORLABS_PASSWORD` | — | yes |
+| Session token (`remember_lm_<hash>` value) | `FORLABS_SESSION_TOKEN` | — | yes |
 | Base URL | `FORLABS_BASE_URL` | `https://bki.forlabs.ru` | no |
 | Timeout (s) | `FORLABS_TIMEOUT_SECONDS` | `30` | no |
 | Time zone | `FORLABS_TZ` | `Asia/Irkutsk` | no |
@@ -671,9 +716,8 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
   [`respx`](https://github.com/lundberg/respx) to mock the HTTP layer; no real
   network in the default test run.
 - `uv run pytest` — unit + mocked-HTTP tests (fast, no credentials needed).
-- `uv run pytest -m integration` (only runs when `FORLABS_USERNAME`/
-  `FORLABS_PASSWORD` are set) — hits the real backend for a smoke check
-  (`reference` + `schedule`).
+- `uv run pytest -m integration` (only runs when `FORLABS_SESSION_TOKEN` is
+  set) — hits the real backend for a smoke check (`reference` + `schedule`).
 - `tests/test_repo_privacy.py` — a guardrail test scanning every **git-tracked**
   `tests/fixtures/*.json` and `docs/*.md` (via `git ls-files`, so a gitignored
   local scratch file is never scanned) for:
@@ -699,8 +743,7 @@ that resolves its own repo path at runtime and prints:
   "command": "uv",
   "args": ["--directory", "<absolute-repo-path>", "run", "forlabs-mcp"],
   "env": {
-    "FORLABS_USERNAME": "your.login",
-    "FORLABS_PASSWORD": "your-password"
+    "FORLABS_SESSION_TOKEN": "your-session-token"
   }
 }
 ```

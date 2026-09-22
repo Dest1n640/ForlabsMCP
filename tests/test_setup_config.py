@@ -29,19 +29,17 @@ def _scripted_input(responses: list[str]):
 
 
 def test_render_toml_round_trips_special_characters(setup_config) -> None:
-    rendered = setup_config.render_toml({"password": 'weird"pass\\word'})
+    rendered = setup_config.render_toml({"session_token": 'weird"token\\value'})
     parsed = tomllib.loads(rendered)
-    assert parsed["forlabs"]["password"] == 'weird"pass\\word'
+    assert parsed["forlabs"]["session_token"] == 'weird"token\\value'
 
 
-def test_run_writes_credentials_with_restricted_permissions(
+def test_run_writes_session_token_with_restricted_permissions(
     tmp_path, monkeypatch: pytest.MonkeyPatch, setup_config
 ) -> None:
     config_path = tmp_path / "config.toml"
     monkeypatch.setenv("FORLABS_MCP_CONFIG", str(config_path))
-    monkeypatch.setattr(
-        setup_config, "input", _scripted_input(["student.login", "", ""]), raising=False
-    )
+    monkeypatch.setattr(setup_config, "input", _scripted_input(["", ""]), raising=False)
     monkeypatch.setattr(setup_config.getpass, "getpass", lambda prompt="": "super-secret")
 
     setup_config.run()
@@ -51,10 +49,11 @@ def test_run_writes_credentials_with_restricted_permissions(
     assert mode == 0o600
 
     data = tomllib.loads(config_path.read_text())["forlabs"]
-    assert data["username"] == "student.login"
-    assert data["password"] == "super-secret"
+    assert data["session_token"] == "super-secret"
     assert data["base_url"] == setup_config.DEFAULT_BASE_URL
     assert data["timezone"] == setup_config.DEFAULT_TZ
+    assert "username" not in data
+    assert "password" not in data
 
 
 def test_run_accepts_custom_optional_values(
@@ -65,7 +64,7 @@ def test_run_accepts_custom_optional_values(
     monkeypatch.setattr(
         setup_config,
         "input",
-        _scripted_input(["student.login", "https://example.test", "Europe/Moscow"]),
+        _scripted_input(["https://example.test", "Europe/Moscow"]),
         raising=False,
     )
     monkeypatch.setattr(setup_config.getpass, "getpass", lambda prompt="": "super-secret")
@@ -81,7 +80,7 @@ def test_run_declining_overwrite_leaves_existing_file_untouched(
     tmp_path, monkeypatch: pytest.MonkeyPatch, setup_config
 ) -> None:
     config_path = tmp_path / "config.toml"
-    config_path.write_text('[forlabs]\nusername = "old"\npassword = "old-pass"\n')
+    config_path.write_text('[forlabs]\nsession_token = "old-value"\n')
     original_content = config_path.read_text()
 
     monkeypatch.setenv("FORLABS_MCP_CONFIG", str(config_path))
@@ -92,14 +91,12 @@ def test_run_declining_overwrite_leaves_existing_file_untouched(
     assert config_path.read_text() == original_content
 
 
-def test_password_never_appears_in_captured_output(
+def test_session_token_never_appears_in_captured_output(
     tmp_path, monkeypatch: pytest.MonkeyPatch, setup_config, capsys
 ) -> None:
     config_path = tmp_path / "config.toml"
     monkeypatch.setenv("FORLABS_MCP_CONFIG", str(config_path))
-    monkeypatch.setattr(
-        setup_config, "input", _scripted_input(["student.login", "", ""]), raising=False
-    )
+    monkeypatch.setattr(setup_config, "input", _scripted_input(["", ""]), raising=False)
     monkeypatch.setattr(setup_config.getpass, "getpass", lambda prompt="": "super-secret-value")
 
     setup_config.run()

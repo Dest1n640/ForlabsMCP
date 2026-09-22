@@ -13,12 +13,17 @@ backend'у проходит через единственный примитив
 Forlabs. Единственный файл, который сервер пишет локально — кеш
 сессионных cookie (права доступа `0600`).
 
+**Пароль от аккаунта серверу вообще не нужен.** Аутентификация — через
+долгоживущий cookie `remember_lm_<hash>` (~5 лет), который вы один раз
+копируете из уже залогиненной сессии в браузере — см. «Конфигурация»
+ниже.
+
 ## Требования
 
 - Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/)
-- Учётная запись студента Forlabs/Lamotivo (логин/пароль, которые вы
-  используете на `bki.forlabs.ru/app/login` — это не email)
+- Учётная запись студента Forlabs/Lamotivo, в которую вы уже залогинены
+  в браузере (нужно один раз скопировать оттуда cookie — см. ниже)
 
 ## Установка
 
@@ -35,7 +40,7 @@ uv run pytest
 ```
 
 Все тесты работают на синтетических фикстурах, без обращения к реальному
-backend'у и без необходимости иметь настроенные креды.
+backend'у и без необходимости иметь настроенный токен.
 
 ## Конфигурация
 
@@ -44,23 +49,34 @@ TOML-файл конфигурации > встроенное значение �
 
 | Настройка | Переменная окружения | По умолчанию | Обязательна |
 |---|---|---|---|
-| Логин | `FORLABS_USERNAME` | — | да |
-| Пароль | `FORLABS_PASSWORD` | — | да |
+| Session token (значение `remember_lm_<hash>`) | `FORLABS_SESSION_TOKEN` | — | да |
 | Base URL | `FORLABS_BASE_URL` | `https://bki.forlabs.ru` | нет |
 | Таймаут (сек.) | `FORLABS_TIMEOUT_SECONDS` | `30` | нет |
 | Часовой пояс | `FORLABS_TZ` | `Asia/Irkutsk` | нет |
 | Путь к кешу сессии | `FORLABS_SESSION_PATH` | `~/.local/state/forlabs-mcp/session.json` | нет |
 | Максимум элементов в списке | `FORLABS_MAX_ITEMS` | `200` | нет |
 
-Проверка логина/пароля происходит до любого сетевого запроса — если их
-нет ни в одном источнике, сервер сразу завершается с ошибкой конфигурации,
-не пытаясь залогиниться.
+Проверка `session_token` происходит до любого сетевого запроса — если его
+нет ни в одном источнике, сервер сразу завершается с ошибкой конфигурации.
+
+**Где взять `session_token`:**
+1. Откройте `https://bki.forlabs.ru/app` в браузере и залогиньтесь как обычно.
+2. DevTools → вкладка **Application** (Chrome) / **Storage** (Firefox) →
+   Cookies → `https://bki.forlabs.ru`.
+3. Найдите cookie с именем, начинающимся на `remember_lm_` — скопируйте его
+   **Value**. (Он не виден через `document.cookie` в консоли — специально
+   помечен `HttpOnly` — но в списке cookie в DevTools отображается всегда.)
+
+Это разовое действие: измеренный срок жизни такого cookie — около 5 лет,
+обычные запросы сами продлевают короткоживущую сессию под капотом.
+Обращайтесь со значением `session_token` как с паролем — оно даёт полный
+доступ к аккаунту на весь этот срок.
 
 ### Вариант A: переменные окружения
 
-Задайте `FORLABS_USERNAME` и `FORLABS_PASSWORD` (и любые опциональные
-переопределения) в окружении, где запускается сервер. Именно под это
-`scripts/print_mcp_config.py` (см. ниже) генерирует шаблон.
+Задайте `FORLABS_SESSION_TOKEN` (и любые опциональные переопределения) в
+окружении, где запускается сервер. Именно под это `scripts/print_mcp_config.py`
+(см. ниже) генерирует шаблон.
 
 ### Вариант Б: TOML-файл конфигурации
 
@@ -70,52 +86,51 @@ TOML-файл конфигурации > встроенное значение �
 
 ```toml
 [forlabs]
-username = "ваш.логин"
-password = "ваш-пароль"
+session_token = "значение-remember_lm-cookie"
 # base_url, timeout_seconds, timezone, session_path, max_items — все опциональны
 ```
 
 ### Вариант В: интерактивный wizard (самый простой)
 
 Не нужно ни открывать код, ни вручную писать TOML — скрипт спросит
-логин и пароль (пароль вводится скрыто) и сам запишет файл:
+значение токена (ввод скрыт) и сам запишет файл, с инструкцией, где его
+взять в DevTools:
 
 ```bash
 uv run python scripts/setup_config.py
 ```
 
-Пароль нигде не отображается и не сохраняется никуда, кроме этого
+Токен нигде не отображается и не сохраняется никуда, кроме этого
 локального файла (права доступа сразу выставляются в `0600`). Если файл
 уже существует, скрипт спросит подтверждение перед перезаписью.
 
 Если запустить этот wizard **до** генерации конфига для MCP-хоста (см.
-ниже), `scripts/print_mcp_config.py` сам обнаружит, что креды уже
-сохранены в TOML-файле, и не будет включать блок `env` в вывод вообще —
-то есть после wizard'а вставлять логин/пароль в скопированную команду
-уже не нужно, сервер сам подхватит их из файла.
+ниже), `scripts/print_mcp_config.py` сам обнаружит, что токен уже
+сохранён в TOML-файле, и не будет включать блок `env` в вывод вообще —
+то есть после wizard'а вставлять токен в скопированную команду уже не
+нужно, сервер сам подхватит его из файла.
 
 ## Регистрация в MCP-хосте
 
-Любому MCP-хосту нужны **command** и его **args**, а также, если креды
-ещё не сохранены через wizard выше — переменные **env**. Сгенерировать
+Любому MCP-хосту нужны **command** и его **args**, а также, если токен
+ещё не сохранён через wizard выше — переменные **env**. Сгенерировать
 этот объект можно так:
 
 ```bash
 uv run python scripts/print_mcp_config.py
 ```
 
-Это выведет (поля с кредами всегда плейсхолдеры — впишите свои
-логин/пароль после того, как вставите результат). Для Claude Desktop и
-Claude Code скрипт умеет сразу печатать готовую под них форму — см.
-`--host claude-desktop` / `--host claude-code` ниже.
+Это выведет (поле с кредом всегда плейсхолдер — впишите свой токен после
+того, как вставите результат). Для Claude Desktop и Claude Code скрипт
+умеет сразу печатать готовую под них форму — см. `--host claude-desktop` /
+`--host claude-code` ниже.
 
 ```json
 {
   "command": "uv",
   "args": ["--directory", "<абсолютный-путь-к-этому-репозиторию>", "run", "forlabs-mcp"],
   "env": {
-    "FORLABS_USERNAME": "your.login",
-    "FORLABS_PASSWORD": "your-password"
+    "FORLABS_SESSION_TOKEN": "your-session-token"
   }
 }
 ```
@@ -136,8 +151,7 @@ uv run python scripts/print_mcp_config.py --host claude-desktop
       "command": "uv",
       "args": ["--directory", "<абсолютный-путь-к-этому-репозиторию>", "run", "forlabs-mcp"],
       "env": {
-        "FORLABS_USERNAME": "your.login",
-        "FORLABS_PASSWORD": "your-password"
+        "FORLABS_SESSION_TOKEN": "your-session-token"
       }
     }
   }
@@ -154,20 +168,19 @@ uv run python scripts/print_mcp_config.py --host claude-code
 целиком:
 
 ```bash
-claude mcp add-json forlabs '{"command":"uv","args":["--directory","<абсолютный-путь-к-этому-репозиторию>","run","forlabs-mcp"],"env":{"FORLABS_USERNAME":"your.login","FORLABS_PASSWORD":"your-password"}}'
+claude mcp add-json forlabs '{"command":"uv","args":["--directory","<абсолютный-путь-к-этому-репозиторию>","run","forlabs-mcp"],"env":{"FORLABS_SESSION_TOKEN":"your-session-token"}}'
 ```
 
 ### Hermes Agent
 
-Те же три поля в виде YAML:
+Те же поля в виде YAML:
 
 ```yaml
 forlabs:
   command: uv
   args: ["--directory", "<абсолютный-путь-к-этому-репозиторию>", "run", "forlabs-mcp"]
   env:
-    FORLABS_USERNAME: your.login
-    FORLABS_PASSWORD: your-password
+    FORLABS_SESSION_TOKEN: your-session-token
 ```
 
 ### Любой другой MCP-клиент
