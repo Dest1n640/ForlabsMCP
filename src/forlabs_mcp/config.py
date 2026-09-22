@@ -19,8 +19,7 @@ DEFAULT_TZ = "Asia/Irkutsk"
 DEFAULT_SESSION_PATH = "~/.local/state/forlabs-mcp/session.json"
 DEFAULT_MAX_ITEMS = 200
 
-_ENV_USERNAME = "FORLABS_USERNAME"
-_ENV_PASSWORD = "FORLABS_PASSWORD"
+_ENV_SESSION_TOKEN = "FORLABS_SESSION_TOKEN"
 _ENV_BASE_URL = "FORLABS_BASE_URL"
 _ENV_TIMEOUT_SECONDS = "FORLABS_TIMEOUT_SECONDS"
 _ENV_TZ = "FORLABS_TZ"
@@ -33,8 +32,7 @@ _DEFAULT_CONFIG_FILE = "~/.config/forlabs-mcp/config.toml"
 
 @dataclass(frozen=True)
 class ForlabsConfig:
-    username: str
-    password: str
+    session_token: str
     base_url: str = DEFAULT_BASE_URL
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     timezone: str = DEFAULT_TZ
@@ -42,10 +40,9 @@ class ForlabsConfig:
     max_items: int = DEFAULT_MAX_ITEMS
 
     def redacted(self) -> dict[str, object]:
-        """Return this config as a dict safe to log: the password is masked."""
+        """Return this config as a dict safe to log: the session token is masked."""
         return {
-            "username": self.username,
-            "password": "***",
+            "session_token": "***",
             "base_url": self.base_url,
             "timeout_seconds": self.timeout_seconds,
             "timezone": self.timezone,
@@ -73,7 +70,7 @@ def _load_toml_table(path: Path) -> dict[str, object]:
 def load_config() -> ForlabsConfig:
     """Resolve a ForlabsConfig: env var > TOML file > built-in default.
 
-    Raises ConfigError if username/password are missing from every source,
+    Raises ConfigError if session_token is missing from every source,
     before any network call is made.
     """
     toml_table = _load_toml_table(_config_file_path())
@@ -86,12 +83,9 @@ def load_config() -> ForlabsConfig:
             return toml_table[key]
         return default
 
-    username = resolve("username", _ENV_USERNAME, None)
-    password = resolve("password", _ENV_PASSWORD, None)
-    if not username:
-        raise ConfigError("Missing required setting: username.", key="username")
-    if not password:
-        raise ConfigError("Missing required setting: password.", key="password")
+    session_token = resolve("session_token", _ENV_SESSION_TOKEN, None)
+    if not session_token:
+        raise ConfigError("Missing required setting: session_token.", key="session_token")
 
     base_url = str(resolve("base_url", _ENV_BASE_URL, DEFAULT_BASE_URL))
     timeout_seconds = float(
@@ -104,8 +98,7 @@ def load_config() -> ForlabsConfig:
     max_items = int(resolve("max_items", _ENV_MAX_ITEMS, DEFAULT_MAX_ITEMS))
 
     return ForlabsConfig(
-        username=str(username),
-        password=str(password),
+        session_token=str(session_token),
         base_url=base_url,
         timeout_seconds=timeout_seconds,
         timezone=timezone,

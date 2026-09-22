@@ -15,8 +15,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _config(tmp_path) -> ForlabsConfig:
     return ForlabsConfig(
-        username="student.login",
-        password="super-secret-password",
+        session_token="remember-cookie-value",
         base_url=BASE_URL,
         session_path=tmp_path / "session.json",
     )
@@ -25,11 +24,6 @@ def _config(tmp_path) -> ForlabsConfig:
 def _mock_login_success() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
-    )
-    respx.post(f"{BASE_URL}/app/login").mock(
-        return_value=httpx.Response(
-            200, json={}, headers=[("set-cookie", "forlabs_session=xyz123; Path=/")]
-        )
     )
 
 

@@ -10,14 +10,14 @@ By default this prints the bare {command, args, env} object. Pass
   --host claude-desktop  wrapped as {"mcpServers": {"forlabs": ...}}
   --host claude-code     a ready `claude mcp add-json forlabs '...'` command
 
-If `scripts/setup_config.py` has already saved a username and password
-to the local TOML config file, the "env" block is left out entirely -
-the server will pick the credentials up from that file at runtime, so
-there is nothing left to type into the pasted command. Otherwise "env"
-carries placeholder credential fields - never real values, even if
-FORLABS_USERNAME/FORLABS_PASSWORD happen to be set in the environment
-this script runs in - the user fills them in themselves (or runs
-setup_config.py instead).
+If `scripts/setup_config.py` has already saved a session_token to the
+local TOML config file, the "env" block is left out entirely - the
+server will pick the token up from that file at runtime, so there is
+nothing left to type into the pasted command. Otherwise "env" carries a
+placeholder credential field - never a real value, even if
+FORLABS_SESSION_TOKEN happens to be set in the environment this script
+runs in - the user fills it in themselves (or runs setup_config.py
+instead).
 
 Dependency-free by design: only the standard library, so it runs even
 before `uv sync` has been done.
@@ -44,7 +44,7 @@ def _config_file_path() -> Path:
 
 def has_saved_credentials() -> bool:
     """True if the local TOML config file already has a non-empty
-    username and password (typically written by scripts/setup_config.py)."""
+    session_token (typically written by scripts/setup_config.py)."""
     path = _config_file_path()
     if not path.is_file():
         return False
@@ -56,7 +56,7 @@ def has_saved_credentials() -> bool:
     table = data.get("forlabs", data)
     if not isinstance(table, dict):
         return False
-    return bool(table.get("username")) and bool(table.get("password"))
+    return bool(table.get("session_token"))
 
 
 def build_config() -> dict:
@@ -67,8 +67,7 @@ def build_config() -> dict:
     }
     if not has_saved_credentials():
         config["env"] = {
-            "FORLABS_USERNAME": "your.login",
-            "FORLABS_PASSWORD": "your-password",
+            "FORLABS_SESSION_TOKEN": "your-session-token",
         }
     return config
 
