@@ -71,6 +71,6 @@
 - [x] 6.2 Manually verify: copy the example to `forlabs-session.json`
       with a dummy token, confirm `git status` stays clean, and confirm
       the server starts past config validation.
-- [ ] 6.3 Open a PR from `simplify-token-setup` to `main` and merge it
+- [x] 6.3 Open a PR from `simplify-token-setup` to `main` and merge it
       (per the project's per-stage auto-PR/merge convention); verify
       `git log main` shows the merge.
