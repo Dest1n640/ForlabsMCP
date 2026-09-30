@@ -65,7 +65,7 @@ class ForlabsSession:
 
         The configured remember cookie lets Laravel establish or renew the
         short-lived session cookies as a side effect of an ordinary
-        request - confirmed live, no separate login or keep-alive call is
+        request - confirmed live, no separate keep-alive call is
         made. If the response still indicates the session token itself was
         rejected, raises AuthError immediately - there is no credential to
         retry with.
