@@ -125,7 +125,16 @@ class ForlabsSession:
     def _persist_session(self) -> None:
         path = self._config.session_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"cookies": dict(self._client.cookies)}
+        # A list of {name, value, domain} records - not a flat name->value
+        # dict - so two cookies that share a name but differ by domain (the
+        # same conflict _xsrf_token() defends against) both survive a
+        # persist/restore round trip instead of one silently overwriting
+        # the other.
+        cookies = [
+            {"name": cookie.name, "value": cookie.value, "domain": cookie.domain}
+            for cookie in self._client.cookies.jar
+        ]
+        payload = {"cookies": cookies}
         path.write_text(json.dumps(payload))
         path.chmod(0o600)
 
@@ -139,15 +148,19 @@ class ForlabsSession:
             return
         if not isinstance(payload, dict):
             return
-        cookies = payload.get("cookies", {})
-        if not isinstance(cookies, dict):
+        cookies = payload.get("cookies", [])
+        if not isinstance(cookies, list):
             return
-        domain = urlparse(self._config.base_url).hostname or ""
-        for name, value in cookies.items():
-            if not isinstance(name, str) or not isinstance(value, str):
-                return
-            # Set with the server's own domain so a later Set-Cookie for the
-            # same name updates this entry instead of coexisting with it
-            # (two same-name cookies on different domains make Cookies.get()
-            # raise CookieConflict).
+        for entry in cookies:
+            if not isinstance(entry, dict):
+                continue
+            name, value, domain = entry.get("name"), entry.get("value"), entry.get("domain")
+            if (
+                not isinstance(name, str)
+                or not isinstance(value, str)
+                or not isinstance(domain, str)
+            ):
+                # Skip just this record - one bad entry shouldn't cost the
+                # rest of an otherwise-valid persisted session.
+                continue
             self._client.cookies.set(name, value, domain=domain)

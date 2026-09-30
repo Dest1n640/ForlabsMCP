@@ -121,16 +121,52 @@ def test_persisted_session_is_restored_without_a_priming_call(tmp_path) -> None:
 def test_malformed_session_file_is_ignored_instead_of_crashing(tmp_path) -> None:
     config = _config(tmp_path)
     config.session_path.parent.mkdir(parents=True, exist_ok=True)
-    config.session_path.write_text(
-        '{"cookies": [{"name": "forlabs_session", "value": "xyz", "domain": ".forlabs.ru", '
-        '"path": "/", "expires": null, "httpOnly": true}]}'
-    )
+    # The old (pre-fix) persisted shape was a flat name->value dict, not a
+    # list of {name, value, domain} records - no longer a shape this loader
+    # accepts, and it must degrade to "not authenticated" rather than crash.
+    config.session_path.write_text('{"cookies": {"forlabs_session": "xyz"}}')
 
     session = ForlabsSession(config)
 
     # Malformed cache is ignored, but the configured token still authenticates.
     assert session.is_authenticated is True
     assert "forlabs_session" not in session._client.cookies
+
+
+def test_session_file_with_one_bad_cookie_entry_still_restores_the_rest(tmp_path) -> None:
+    config = _config(tmp_path)
+    config.session_path.parent.mkdir(parents=True, exist_ok=True)
+    config.session_path.write_text(
+        '{"cookies": ['
+        '{"name": "XSRF-TOKEN", "value": 12345, "domain": "bki.forlabs.ru"},'
+        '{"name": "forlabs_session", "value": "xyz", "domain": "bki.forlabs.ru"}'
+        "]}"
+    )
+
+    session = ForlabsSession(config)
+
+    assert session.is_authenticated is True
+
+
+def test_persist_and_restore_round_trip_keeps_same_name_cookies_on_different_domains(
+    tmp_path,
+) -> None:
+    config = _config(tmp_path)
+    first_session = ForlabsSession(config)
+    first_session._client.cookies.set("XSRF-TOKEN", "value-a", domain="bki.forlabs.ru")
+    first_session._client.cookies.set("XSRF-TOKEN", "value-b", domain="www.bki.forlabs.ru")
+    first_session._client.cookies.set("forlabs_session", "xyz", domain="bki.forlabs.ru")
+
+    first_session._persist_session()
+    second_session = ForlabsSession(config)
+
+    matches = {
+        cookie.domain: cookie.value
+        for cookie in second_session._client.cookies.jar
+        if cookie.name == "XSRF-TOKEN"
+    }
+    assert matches == {"bki.forlabs.ru": "value-a", "www.bki.forlabs.ru": "value-b"}
+    assert second_session.is_authenticated is True
 
 
 @respx.mock
