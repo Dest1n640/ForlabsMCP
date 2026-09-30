@@ -53,7 +53,7 @@
       is authored with it. Do not rewrite history.
 - [x] 5.2 Run `uv run pytest`, `uv run ruff check .`,
       `uv run ruff format --check .`; verify all pass.
-- [ ] 5.3 Open a PR from `harden-leak-protection` to `main` and merge it
+- [x] 5.3 Open a PR from `harden-leak-protection` to `main` and merge it
       (per the project's per-stage auto-PR/merge convention); verify
       `git log main` shows the merge.
 
