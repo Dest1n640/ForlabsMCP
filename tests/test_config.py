@@ -1,6 +1,8 @@
+import json
+
 import pytest
 
-from forlabs_mcp.config import ForlabsConfig, load_config
+from forlabs_mcp.config import TOKEN_PLACEHOLDER, ForlabsConfig, load_config
 from forlabs_mcp.errors import ConfigError
 
 _ALL_ENV_VARS = [
@@ -10,7 +12,7 @@ _ALL_ENV_VARS = [
     "FORLABS_TZ",
     "FORLABS_SESSION_PATH",
     "FORLABS_MAX_ITEMS",
-    "FORLABS_MCP_CONFIG",
+    "FORLABS_TOKEN_FILE",
 ]
 
 
@@ -20,46 +22,66 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 
 
-def _write_toml(tmp_path, contents: str):
-    path = tmp_path / "config.toml"
+def _write_json(tmp_path, contents: str, name: str = "forlabs-session.json"):
+    path = tmp_path / name
     path.write_text(contents)
     return path
 
 
-def test_env_overrides_toml_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    toml_path = _write_toml(
-        tmp_path,
-        """
-        [forlabs]
-        session_token = "toml-token"
-        """,
-    )
-    monkeypatch.setenv("FORLABS_MCP_CONFIG", str(toml_path))
+def test_env_overrides_json_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _write_json(tmp_path, '{"session_token": "file-token"}')
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
     monkeypatch.setenv("FORLABS_SESSION_TOKEN", "env-token")
 
-    config = load_config()
-
-    assert config.session_token == "env-token"
+    assert load_config().session_token == "env-token"
 
 
-def test_toml_without_forlabs_table_is_accepted(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    toml_path = _write_toml(
-        tmp_path,
-        """
-        session_token = "bare-token"
-        """,
-    )
-    monkeypatch.setenv("FORLABS_MCP_CONFIG", str(toml_path))
+def test_json_file_supplies_token_and_optional_overrides(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_json(tmp_path, '{"session_token": "file-token", "max_items": 5}')
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
 
     config = load_config()
 
-    assert config.session_token == "bare-token"
+    assert config.session_token == "file-token"
+    assert config.max_items == 5
+
+
+def test_leftover_toml_file_is_ignored(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "config.toml").write_text('session_token = "toml-token"\n')
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(tmp_path / "absent.json"))
+
+    with pytest.raises(ConfigError):
+        load_config()
+
+
+def test_placeholder_token_is_treated_as_missing(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _write_json(tmp_path, json.dumps({"session_token": TOKEN_PLACEHOLDER}))
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+    assert excinfo.value.key == "session_token"
+
+
+@pytest.mark.parametrize("contents", ["{not json secret-abc", '["secret-abc"]'])
+def test_malformed_token_file_raises_without_leaking_contents(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, contents: str
+) -> None:
+    path = _write_json(tmp_path, contents)
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+    assert "secret-abc" not in str(excinfo.value)
 
 
 def test_missing_session_token_raises_config_error_before_any_network_call(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FORLABS_MCP_CONFIG", str(tmp_path / "does-not-exist.toml"))
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(tmp_path / "does-not-exist.json"))
 
     with pytest.raises(ConfigError):
         load_config()
@@ -68,7 +90,7 @@ def test_missing_session_token_raises_config_error_before_any_network_call(
 def test_defaults_are_applied_when_optional_settings_absent(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("FORLABS_MCP_CONFIG", str(tmp_path / "does-not-exist.toml"))
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(tmp_path / "does-not-exist.json"))
     monkeypatch.setenv("FORLABS_SESSION_TOKEN", "token")
 
     config = load_config()

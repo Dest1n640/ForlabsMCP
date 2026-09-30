@@ -28,7 +28,7 @@ def _config(tmp_path) -> ForlabsConfig:
     )
 
 
-def _mock_login_success() -> None:
+def _mock_xsrf_prime() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
     )
@@ -52,7 +52,7 @@ def test_only_four_read_only_tools_are_registered(tmp_path) -> None:
 
 @respx.mock
 def test_each_tool_dispatches_and_matches_its_contract_shape(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(200, json=_load("sched_get_grid.json"))
     )

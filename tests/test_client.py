@@ -25,7 +25,7 @@ def _config(tmp_path) -> ForlabsConfig:
     )
 
 
-def _mock_login_success() -> None:
+def _mock_xsrf_prime() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
     )
@@ -33,7 +33,7 @@ def _mock_login_success() -> None:
 
 @respx.mock
 def test_reference_without_stream_id_uses_own_stream(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     schedule_fixture = _load("sched_get_schedule.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
@@ -65,7 +65,7 @@ def test_reference_without_stream_id_uses_own_stream(tmp_path) -> None:
 
 @respx.mock
 def test_reference_with_explicit_stream_id_filters_studies_call(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     schedule_fixture = _load("sched_get_schedule.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
@@ -90,7 +90,7 @@ def test_reference_with_explicit_stream_id_filters_studies_call(tmp_path) -> Non
 
 @respx.mock
 def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     scores_fixture = _load("learning_get_scores.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
@@ -113,7 +113,7 @@ def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
 
 @respx.mock
 def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     scores_fixture = _load("learning_get_scores.json")
     # No matching entry in the studies fixture for any of these study_ids
     # under stream 205 alone would already be a stretch; force the case by
@@ -136,7 +136,7 @@ def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
 
 @respx.mock
 def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     scores_fixture = _load("learning_get_scores.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
@@ -155,7 +155,7 @@ def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
 
 @respx.mock
 def test_scores_with_no_matches_returns_note(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
         return_value=httpx.Response(200, json={"scores": {}})
     )
@@ -172,7 +172,7 @@ def test_scores_with_no_matches_returns_note(tmp_path) -> None:
 
 @respx.mock
 def test_scores_with_explicit_stream_id_never_discovers_own_stream(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     # No sched/get_schedule route is registered at all - if the client
     # called it, respx would raise for the unmatched request.
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
@@ -198,7 +198,7 @@ def _tasks_side_effect_only_for_study(target_study_id: str, tasks_fixture: dict)
 
 @respx.mock
 def test_homework_without_study_id_unions_across_studies(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -222,7 +222,7 @@ def test_homework_without_study_id_unions_across_studies(tmp_path) -> None:
 
 @respx.mock
 def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -251,7 +251,7 @@ def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) ->
 
 @respx.mock
 def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     partial_tasks_fixture = {
@@ -276,7 +276,7 @@ def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
 
 @respx.mock
 def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -297,7 +297,7 @@ def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
 
 @respx.mock
 def test_homework_with_no_results_returns_note(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
         return_value=httpx.Response(200, json={"studies": []})
     )
@@ -324,7 +324,7 @@ def test_schedule_raw_mutual_exclusion_rejects_without_any_backend_call(tmp_path
 
 @respx.mock
 def test_schedule_raw_places_lessons_and_reports_week_parity_basis(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     grid_fixture = _load("sched_get_grid.json")
     schedule_fixture = _load("sched_get_schedule.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
@@ -352,7 +352,7 @@ def test_schedule_raw_places_lessons_and_reports_week_parity_basis(tmp_path) -> 
 
 @respx.mock
 def test_schedule_raw_empty_range_returns_note(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     grid_fixture = _load("sched_get_grid.json")
     schedule_fixture = _load("sched_get_schedule.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(

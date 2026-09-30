@@ -7,3 +7,6 @@ __pycache__/
 .ruff_cache/
 dist/
 build/
+
+# Personal session token (copy of forlabs-session.example.json)
+forlabs-session.json

@@ -24,8 +24,9 @@ server writes locally is a session-cookie cache (mode `0600`).
   set an `XSRF-TOKEN` cookie (Laravel's Angular-friendly CSRF cookie).
   AngularJS `$http` echoes that cookie value back in the **`X-XSRF-TOKEN`**
   request header — the client must do the same.
-- **Session**: cookie-based, established by the login form. Session cookie
-  name: **`forlabs_session`**.
+- **Session**: cookie-based. A browser establishes it via the login form; this
+  client instead seeds a long-lived remember cookie (§2.2a) and lets the
+  backend renew the short session cookie **`forlabs_session`** itself.
 
 ### 2.2 Login flow (confirmed from a captured request) — historical, not used by this client
 
@@ -592,8 +593,9 @@ are strings**, not integers, unlike every other endpoint's `stream_id`.
                                                              |
                                                   +----------v-----------+
                                                   | client/session.py     |
-                                                  | httpx.Client, login,   |
-                                                  | XSRF header, cookie    |
+                                                  | httpx.Client, remember |
+                                                  | cookie, XSRF header,   |
+                                                  | cookie                 |
                                                   | persistence (0600)     |
                                                   +----------+-----------+
                                                              |
@@ -604,8 +606,8 @@ Module responsibilities:
 
 | Module | Responsibility |
 |---|---|
-| `config.py` | `ForlabsConfig` dataclass + `load_config()`. Precedence: env var > TOML file > default. Validates and never lets a bad value reach the network layer. `redacted()` for safe logging. |
-| `client/session.py` | `ForlabsSession`: one `httpx.Client`, form login, XSRF header derivation, transparent re-auth-once on session expiry, cookie jar persisted to `session_path` (mode `0600`). |
+| `config.py` | `ForlabsConfig` dataclass + `load_config()`. Precedence: env var > repo-local JSON token file > default. Validates and never lets a bad value reach the network layer. `redacted()` for safe logging. |
+| `client/session.py` | `ForlabsSession`: one `httpx.Client` seeded with the remember cookie, XSRF header derivation, `AuthError` on a rejected token (no re-auth), cookie jar persisted to `session_path` (mode `0600`). |
 | `client/repository.py` | `Repository.call(module, action, params)`: the one RPC primitive. Raises `ProgrammingError` for anything off `READ_ONLY_ACTIONS` **before** any request; raises `UpstreamError` for non-2xx or an in-body error shape. |
 | `client/models.py` | Pydantic models (`extra="ignore"`) for `Stream`, `Study`, `ScheduleGrid`, `Lesson`, `Score`, `Task`, `TaskFile`, `Assignment`, `Identity`. |
 | `client/parsers.py` | Tolerant `payload -> model` functions; a bad row becomes a warning string, never an exception that loses the rest of the response. |
@@ -676,7 +678,7 @@ teacher, room, subgroup}`, `warnings[]`, `note?` ("no lessons..." when empty).
 
 ## 7. Configuration
 
-Precedence: **environment variable > TOML file > built-in default.**
+Precedence: **environment variable > repo-local JSON token file > built-in default.**
 
 | Setting | Env var | Default | Required |
 |---|---|---|---|
@@ -687,9 +689,13 @@ Precedence: **environment variable > TOML file > built-in default.**
 | Session cache | `FORLABS_SESSION_PATH` | `~/.local/state/forlabs-mcp/session.json` | no |
 | Max list items | `FORLABS_MAX_ITEMS` | `200` | no |
 
-TOML file path: `$FORLABS_MCP_CONFIG`, else
-`~/.config/forlabs-mcp/config.toml`, under a `[forlabs]` table (or a bare
-top-level table — `load_config` accepts both).
+Token file: `forlabs-session.json` at the repo root (gitignored; copy from
+the committed `forlabs-session.example.json`), path overridable via
+`FORLABS_TOKEN_FILE`. It is a flat JSON object with the same keys as the
+table (`session_token`, `base_url`, `timeout_seconds`, `timezone`,
+`session_path`, `max_items`). The placeholder token value counts as missing.
+The former `~/.config/forlabs-mcp/config.toml` source was removed and is
+no longer read.
 
 ## 8. Error taxonomy
 
@@ -700,7 +706,7 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
 |---|---|---|
 | `ConfigError` | missing/malformed setting at startup | `key` |
 | `InvalidArgumentError` | bad tool argument, checked before any backend call | `argument` |
-| `AuthError` | login rejected, or re-auth-once also failed | — |
+| `AuthError` | session token rejected by the backend | — |
 | `ConnectivityError` | host unreachable / DNS / connection reset | — |
 | `TimeoutError` | request exceeded configured timeout | — |
 | `RateLimitError` | backend rate-limited | `retry_after` |
@@ -731,29 +737,15 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
 - `uv run ruff check .` / `uv run ruff format .` — lint/format, `select = ["E",
   "F", "I", "UP", "B", "W"]`, line length 100.
 
-## 10. MCP client registration (generator-script approach)
+## 10. MCP client registration
 
-Every MCP host wants the same three things: a **command**, its **args**, and
-the **env** vars it needs. Rather than documenting a hand-edited snippet per
-client, ship `scripts/print_mcp_config.py` — a small, dependency-free script
-that resolves its own repo path at runtime and prints:
-
-```json
-{
-  "command": "uv",
-  "args": ["--directory", "<absolute-repo-path>", "run", "forlabs-mcp"],
-  "env": {
-    "FORLABS_SESSION_TOKEN": "your-session-token"
-  }
-}
-```
-
-It never reads or embeds real credentials — those two fields are always
-placeholders. README then shows how to hand that one object to Claude
-Desktop (`mcpServers.forlabs`), Claude Code (`claude mcp add-json forlabs
-'<paste>'`), Hermes Agent (same fields as YAML), or *any other* MCP client
-that accepts a command/args/env-shaped definition — registering a new,
-previously-undocumented client needs no change to the project itself.
+Every MCP host wants the same three things: a **command**, its **args** and
+the **env** vars it needs. README ships one copy-paste `mcpServers` JSON
+block (`command: uv`, `args: ["--directory", "<repo>", "run",
+"forlabs-mcp"]`, `env.FORLABS_SESSION_TOKEN`) with two placeholders the user
+replaces; hosts with another wrapper take the same three fields. As an
+alternative to `env`, the token can live in the gitignored
+`forlabs-session.json` (§7). There are no generator or wizard scripts.
 
 ## 11. Known gaps / backlog (not yet implemented)
 

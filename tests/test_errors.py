@@ -13,9 +13,9 @@ from forlabs_mcp.errors import (
 
 
 def test_config_error_maps_to_classified_message() -> None:
-    exc = ConfigError("username is missing", key="username")
+    exc = ConfigError("session_token is missing", key="session_token")
     message = to_tool_error(exc)
-    assert message == "Configuration error: username is missing"
+    assert message == "Configuration error: session_token is missing"
 
 
 def test_invalid_argument_error_maps_to_classified_message() -> None:
@@ -25,7 +25,7 @@ def test_invalid_argument_error_maps_to_classified_message() -> None:
 
 
 def test_auth_error_maps_to_classified_message() -> None:
-    exc = AuthError("Forlabs rejected the configured username/password.")
+    exc = AuthError("Forlabs rejected the configured session_token.")
     message = to_tool_error(exc)
     assert message.startswith("Authentication failed:")
 

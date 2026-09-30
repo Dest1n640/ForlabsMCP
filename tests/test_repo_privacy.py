@@ -10,11 +10,14 @@ project's history and had to be scrubbed after the fact.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).parent.parent
+
+PLACEHOLDER_TOKEN = "PASTE_YOUR_remember_lm_COOKIE_VALUE_HERE"
 
 NAME_SHAPE_RE = re.compile(r"[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}")
 ABSOLUTE_PATH_RE = re.compile(r"(?:/Users/|/home/)[A-Za-z0-9_.\-]+")
@@ -80,3 +83,31 @@ def test_find_privacy_violations_catches_an_absolute_home_path() -> None:
 def test_find_privacy_violations_allows_known_synthetic_names() -> None:
     text = '{"lecturer_name": "Кравцова Наталья Игоревна"}'
     assert find_privacy_violations(text) == []
+
+
+def find_token_violations(text: str) -> list[str]:
+    """Return a violation if `text` is JSON carrying a non-placeholder session_token."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    if isinstance(data, dict) and data.get("session_token", PLACEHOLDER_TOKEN) != PLACEHOLDER_TOKEN:
+        return ["non-placeholder session_token"]
+    return []
+
+
+def test_tracked_json_files_carry_no_real_session_token() -> None:
+    violations = [
+        str(path.relative_to(REPO_ROOT))
+        for path in _tracked_files(["*.json"])
+        if find_token_violations(path.read_text(encoding="utf-8"))
+    ]
+    assert violations == []
+
+
+def test_find_token_violations_flags_a_real_looking_token() -> None:
+    assert find_token_violations('{"session_token": "eyJabc123"}') != []
+
+
+def test_find_token_violations_accepts_the_placeholder() -> None:
+    assert find_token_violations(f'{{"session_token": "{PLACEHOLDER_TOKEN}"}}') == []

@@ -93,7 +93,7 @@ def test_auth_error_never_leaks_the_configured_token_value(tmp_path) -> None:
 
 @respx.mock
 def test_persisted_session_is_restored_without_a_priming_call(tmp_path) -> None:
-    login_route = respx.get(f"{BASE_URL}/app/login").mock(
+    prime_route = respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
     )
     data_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
@@ -105,7 +105,7 @@ def test_persisted_session_is_restored_without_a_priming_call(tmp_path) -> None:
     config = _config(tmp_path)
     first_session = ForlabsSession(config)
     first_session.request("POST", "/lm-vendor/repositories/sched/get_schedule", {})
-    assert login_route.call_count == 1
+    assert prime_route.call_count == 1
 
     second_session = ForlabsSession(config)
     assert "forlabs_session" in second_session._client.cookies
@@ -115,7 +115,7 @@ def test_persisted_session_is_restored_without_a_priming_call(tmp_path) -> None:
     assert response.status_code == 200
     assert data_route.call_count == 2
     # The restored XSRF-TOKEN meant no second priming GET was needed.
-    assert login_route.call_count == 1
+    assert prime_route.call_count == 1
 
 
 def test_malformed_session_file_is_ignored_instead_of_crashing(tmp_path) -> None:
@@ -131,3 +131,19 @@ def test_malformed_session_file_is_ignored_instead_of_crashing(tmp_path) -> None
     # Malformed cache is ignored, but the configured token still authenticates.
     assert session.is_authenticated is True
     assert "forlabs_session" not in session._client.cookies
+
+
+@respx.mock
+def test_cold_start_call_never_posts_to_the_login_endpoint(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json={"meta": {}})
+    )
+    login_post = respx.post(f"{BASE_URL}/app/login").mock(return_value=httpx.Response(500))
+
+    session = ForlabsSession(_config(tmp_path))
+    session.request("POST", "/lm-vendor/repositories/sched/get_schedule", {})
+
+    assert login_post.call_count == 0

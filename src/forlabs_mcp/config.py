@@ -1,13 +1,13 @@
 """Layered, validated configuration for the Forlabs client.
 
-Precedence: environment variable > TOML config file > built-in default.
+Precedence: environment variable > repo-local JSON token file > built-in default.
 See PROJECT-REFERENCE.md §7.
 """
 
 from __future__ import annotations
 
+import json
 import os
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,9 +25,15 @@ _ENV_TIMEOUT_SECONDS = "FORLABS_TIMEOUT_SECONDS"
 _ENV_TZ = "FORLABS_TZ"
 _ENV_SESSION_PATH = "FORLABS_SESSION_PATH"
 _ENV_MAX_ITEMS = "FORLABS_MAX_ITEMS"
-_ENV_CONFIG_FILE = "FORLABS_MCP_CONFIG"
+_ENV_TOKEN_FILE = "FORLABS_TOKEN_FILE"
 
-_DEFAULT_CONFIG_FILE = "~/.config/forlabs-mcp/config.toml"
+# Repo root, resolved from the package location so it does not depend on
+# the working directory the MCP host starts the server in.
+_DEFAULT_TOKEN_FILE = Path(__file__).resolve().parents[2] / "forlabs-session.json"
+
+# Value shipped in forlabs-session.example.json; a copied-but-unedited
+# template must read as "token missing", not as a real token.
+TOKEN_PLACEHOLDER = "PASTE_YOUR_remember_lm_COOKIE_VALUE_HERE"
 
 
 @dataclass(frozen=True)
@@ -51,40 +57,48 @@ class ForlabsConfig:
         }
 
 
-def _config_file_path() -> Path:
-    override = os.environ.get(_ENV_CONFIG_FILE)
+def _token_file_path() -> Path:
+    override = os.environ.get(_ENV_TOKEN_FILE)
     if override:
         return Path(override).expanduser()
-    return Path(_DEFAULT_CONFIG_FILE).expanduser()
+    return _DEFAULT_TOKEN_FILE
 
 
-def _load_toml_table(path: Path) -> dict[str, object]:
+def _load_json_table(path: Path) -> dict[str, object]:
     if not path.is_file():
         return {}
-    with path.open("rb") as fh:
-        data = tomllib.load(fh)
-    table = data.get("forlabs", data)
-    return table if isinstance(table, dict) else {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        # Never echo the file's contents: it holds the session token.
+        raise ConfigError(
+            f"Token file {path.name} is unreadable or not valid JSON.", key="session_token"
+        ) from exc
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"Token file {path.name} must contain a JSON object.", key="session_token"
+        )
+    return data
 
 
 def load_config() -> ForlabsConfig:
-    """Resolve a ForlabsConfig: env var > TOML file > built-in default.
+    """Resolve a ForlabsConfig: env var > JSON token file > built-in default.
 
     Raises ConfigError if session_token is missing from every source,
     before any network call is made.
     """
-    toml_table = _load_toml_table(_config_file_path())
+    file_table = _load_json_table(_token_file_path())
 
     def resolve(key: str, env_var: str, default: object) -> object:
         env_value = os.environ.get(env_var)
         if env_value:
             return env_value
-        if key in toml_table:
-            return toml_table[key]
+        if key in file_table:
+            return file_table[key]
         return default
 
     session_token = resolve("session_token", _ENV_SESSION_TOKEN, None)
-    if not session_token:
+    if not session_token or session_token == TOKEN_PLACEHOLDER:
         raise ConfigError("Missing required setting: session_token.", key="session_token")
 
     base_url = str(resolve("base_url", _ENV_BASE_URL, DEFAULT_BASE_URL))

@@ -29,7 +29,7 @@ class InvalidArgumentError(ForlabsError):
 
 
 class AuthError(ForlabsError):
-    """Login was rejected, or re-auth-once also failed."""
+    """The configured session token was rejected by the backend."""
 
 
 class ConnectivityError(ForlabsError):
