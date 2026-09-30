@@ -11,8 +11,7 @@ from forlabs_mcp.server import build_server
 def test_build_server_registers_four_tools_without_loading_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("FORLABS_USERNAME", raising=False)
-    monkeypatch.delenv("FORLABS_PASSWORD", raising=False)
+    monkeypatch.delenv("FORLABS_SESSION_TOKEN", raising=False)
 
     server = build_server()
 

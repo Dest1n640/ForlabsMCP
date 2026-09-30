@@ -22,21 +22,15 @@ def _load(name: str) -> dict:
 
 def _config(tmp_path) -> ForlabsConfig:
     return ForlabsConfig(
-        username="student.login",
-        password="super-secret-password",
+        session_token="remember-cookie-value",
         base_url=BASE_URL,
         session_path=tmp_path / "session.json",
     )
 
 
-def _mock_login_success() -> None:
+def _mock_xsrf_prime() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
-    )
-    respx.post(f"{BASE_URL}/app/login").mock(
-        return_value=httpx.Response(
-            200, json={}, headers=[("set-cookie", "forlabs_session=xyz123; Path=/")]
-        )
     )
 
 
@@ -58,7 +52,7 @@ def test_only_four_read_only_tools_are_registered(tmp_path) -> None:
 
 @respx.mock
 def test_each_tool_dispatches_and_matches_its_contract_shape(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(200, json=_load("sched_get_grid.json"))
     )
@@ -114,10 +108,8 @@ def test_forlabs_error_surfaces_as_classified_tool_error(tmp_path) -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
     )
-    respx.post(f"{BASE_URL}/app/login").mock(
-        return_value=httpx.Response(
-            422, json={"errors": {"username": ["Неверный логин или пароль"]}}
-        )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(419, json={"message": "session expired"})
     )
 
     server = _build_server(tmp_path)
@@ -127,4 +119,4 @@ def test_forlabs_error_surfaces_as_classified_tool_error(tmp_path) -> None:
 
     message = str(exc_info.value)
     assert "Authentication failed" in message
-    assert "super-secret-password" not in message
+    assert "remember-cookie-value" not in message

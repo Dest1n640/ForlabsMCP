@@ -15,21 +15,15 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _config(tmp_path) -> ForlabsConfig:
     return ForlabsConfig(
-        username="student.login",
-        password="super-secret-password",
+        session_token="remember-cookie-value",
         base_url=BASE_URL,
         session_path=tmp_path / "session.json",
     )
 
 
-def _mock_login_success() -> None:
+def _mock_xsrf_prime() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
-    )
-    respx.post(f"{BASE_URL}/app/login").mock(
-        return_value=httpx.Response(
-            200, json={}, headers=[("set-cookie", "forlabs_session=xyz123; Path=/")]
-        )
     )
 
 
@@ -49,7 +43,7 @@ def test_disallowed_action_raises_without_any_http_request(tmp_path) -> None:
 
 @respx.mock
 def test_allowed_action_returns_parsed_payload(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     grid_fixture = json.loads((FIXTURES / "sched_get_grid.json").read_text())
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(200, json=grid_fixture)
@@ -65,7 +59,7 @@ def test_allowed_action_returns_parsed_payload(tmp_path) -> None:
 
 @respx.mock
 def test_message_only_body_maps_to_upstream_error(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(200, json={"message": "Something went wrong."})
     )
@@ -83,7 +77,7 @@ def test_message_only_body_maps_to_upstream_error(tmp_path) -> None:
 
 @respx.mock
 def test_non_2xx_status_maps_to_upstream_error(tmp_path) -> None:
-    _mock_login_success()
+    _mock_xsrf_prime()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(500, json={"error": "internal"})
     )
