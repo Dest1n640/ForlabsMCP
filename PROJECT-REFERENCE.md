@@ -724,16 +724,23 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
 - `uv run pytest` — unit + mocked-HTTP tests (fast, no credentials needed).
 - `uv run pytest -m integration` (only runs when `FORLABS_SESSION_TOKEN` is
   set) — hits the real backend for a smoke check (`reference` + `schedule`).
-- `tests/test_repo_privacy.py` — a guardrail test scanning every **git-tracked**
-  `tests/fixtures/*.json` and `docs/*.md` (via `git ls-files`, so a gitignored
-  local scratch file is never scanned) for:
-  - Title-Case-Cyrillic name-shaped patterns (`[А-ЯЁ][а-яё]+ [А-ЯЁ][а-яё]+...`)
-    outside a small hardcoded allow-list of the synthetic names already in
-    use — anything else name-shaped fails the test;
+- `tests/test_repo_privacy.py` + `tools/leakscan.py` — a guardrail scanning
+  **every git-tracked text file** (via `git ls-files`, so the gitignored
+  `forlabs-session.json` is never read; `uv.lock` and binaries skipped) for:
+  - high-confidence secret shapes (Laravel remember/session/XSRF cookie
+    values, JWT-like strings, GitHub/OpenAI/AWS keys, private-key blocks,
+    bearer tokens) and a non-placeholder `session_token` in tracked JSON;
+  - Title-Case-Cyrillic name-shaped patterns outside a small hardcoded
+    allow-list of the synthetic names already in use;
   - absolute `/Users/<name>` or `/home/<name>` paths.
 
-  Keep the allow-list in `tests/test_repo_privacy.py` in sync whenever a new
-  synthetic name is introduced into a fixture.
+  Findings are reported as `path:line: rule` only, never the value. The
+  same scanner runs at commit time via the opt-in `.githooks/pre-commit`
+  (`git config core.hooksPath .githooks`), on staged content. Keep the
+  name allow-list in `tools/leakscan.py` in sync whenever a new synthetic
+  name is introduced into a fixture. Test values that look like secrets
+  must be assembled at runtime (see `tests/test_leakscan.py`), or the
+  scanner flags the test file itself.
 - `uv run ruff check .` / `uv run ruff format .` — lint/format, `select = ["E",
   "F", "I", "UP", "B", "W"]`, line length 100.
 
@@ -780,7 +787,7 @@ group is capture → document → decide).
   reflog expiry + aggressive gc (or a from-scratch reinit) as an explicit
   step — don't assume a history rewrite alone is sufficient.
 - **Scan tracked files, not the working directory.** The privacy guardrail
-  test (§9) deliberately reads `git ls-files`, not a filesystem glob, so a
+  (§9) deliberately reads `git ls-files`, not a filesystem glob, so a
   gitignored local note (this project's `docs/mcp-smoke.md`, which
   legitimately contains a real local path for one developer's own
   reference) is never flagged or forced to be sanitized.

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks a commit whose staged content matches a leak rule (secret-shaped
+# value, unlisted personal name, absolute home path). Output is
+# path:line: rule only; the matched value is never printed.
+#
+# Opt-in, once per clone:  git config core.hooksPath .githooks
+# Bypass (use deliberately): git commit --no-verify
+root="$(git rev-parse --show-toplevel)" || exit 1
+exec python3 "$root/tools/leakscan.py" --staged --root "$root"
