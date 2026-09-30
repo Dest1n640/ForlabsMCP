@@ -36,6 +36,70 @@ def test_env_overrides_json_file(tmp_path, monkeypatch: pytest.MonkeyPatch) -> N
     assert load_config().session_token == "env-token"
 
 
+def test_unexpanded_placeholder_env_falls_through_to_json_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_json(tmp_path, '{"session_token": "file-token"}')
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
+    monkeypatch.setenv("FORLABS_SESSION_TOKEN", "${FORLABS_SESSION_TOKEN}")
+
+    assert load_config().session_token == "file-token"
+
+
+def test_unexpanded_placeholder_env_without_file_is_missing_token(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(tmp_path / "does-not-exist.json"))
+    monkeypatch.setenv("FORLABS_SESSION_TOKEN", "${FORLABS_SESSION_TOKEN}")
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+    assert excinfo.value.key == "session_token"
+
+
+@pytest.mark.parametrize(
+    ("env_var", "placeholder", "key", "file_value", "attr", "expected"),
+    [
+        ("FORLABS_BASE_URL", "${FORLABS_BASE_URL}", "base_url", "https://file.example", "base_url", "https://file.example"),
+        ("FORLABS_BASE_URL", "https://${HOST}", "base_url", None, "base_url", "https://bki.forlabs.ru"),
+        ("FORLABS_MAX_ITEMS", "${FORLABS_MAX_ITEMS}", "max_items", 7, "max_items", 7),
+        ("FORLABS_MAX_ITEMS", "${FORLABS_MAX_ITEMS}", "max_items", None, "max_items", 200),
+    ],
+)
+def test_unexpanded_placeholder_in_optional_setting_uses_file_then_default(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    env_var: str,
+    placeholder: str,
+    key: str,
+    file_value: object,
+    attr: str,
+    expected: object,
+) -> None:
+    table = {"session_token": "file-token"}
+    if file_value is not None:
+        table[key] = file_value
+    path = _write_json(tmp_path, json.dumps(table))
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
+    monkeypatch.setenv(env_var, placeholder)
+
+    assert getattr(load_config(), attr) == expected
+
+
+def test_skipped_placeholder_warning_names_variable_but_not_value(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = _write_json(tmp_path, '{"session_token": "file-token"}')
+    monkeypatch.setenv("FORLABS_TOKEN_FILE", str(path))
+    monkeypatch.setenv("FORLABS_SESSION_TOKEN", "${SECRET-MARKER}")
+
+    with caplog.at_level("WARNING"):
+        load_config()
+
+    assert "FORLABS_SESSION_TOKEN" in caplog.text
+    assert "SECRET-MARKER" not in caplog.text
+
+
 def test_json_file_supplies_token_and_optional_overrides(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

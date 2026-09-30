@@ -1,17 +1,22 @@
 """Layered, validated configuration for the Forlabs client.
 
 Precedence: environment variable > repo-local JSON token file > built-in default.
+An environment value holding an unexpanded ``${...}`` placeholder counts as unset.
 See PROJECT-REFERENCE.md §7.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from .errors import ConfigError
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://bki.forlabs.ru"
 DEFAULT_TIMEOUT_SECONDS = 30.0
@@ -34,6 +39,10 @@ _DEFAULT_TOKEN_FILE = Path(__file__).resolve().parents[2] / "forlabs-session.jso
 # Value shipped in forlabs-session.example.json; a copied-but-unedited
 # template must read as "token missing", not as a real token.
 TOKEN_PLACEHOLDER = "PASTE_YOUR_remember_lm_COOKIE_VALUE_HERE"
+
+# MCP hosts that do not interpolate their `env` block pass "${VAR}" through
+# literally; no legitimate setting value contains one.
+_UNEXPANDED_PLACEHOLDER = re.compile(r"\$\{[^}]*\}")
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,9 @@ def _load_json_table(path: Path) -> dict[str, object]:
 def load_config() -> ForlabsConfig:
     """Resolve a ForlabsConfig: env var > JSON token file > built-in default.
 
+    An env value containing an unexpanded ``${...}`` placeholder is treated
+    as unset (with a warning naming the variable, never its value).
+
     Raises ConfigError if session_token is missing from every source,
     before any network call is made.
     """
@@ -91,7 +103,11 @@ def load_config() -> ForlabsConfig:
 
     def resolve(key: str, env_var: str, default: object) -> object:
         env_value = os.environ.get(env_var)
-        if env_value:
+        if env_value and _UNEXPANDED_PLACEHOLDER.search(env_value):
+            logger.warning(
+                "%s contains an unexpanded ${...} placeholder; ignoring it.", env_var
+            )
+        elif env_value:
             return env_value
         if key in file_table:
             return file_table[key]
