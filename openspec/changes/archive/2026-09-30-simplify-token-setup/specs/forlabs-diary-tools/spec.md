@@ -40,6 +40,19 @@ configuration with the `session_token` value redacted for logging.
   diagnostics
 - **THEN** the `session_token` value does not appear in that output
 
+### Requirement: Portable MCP client registration
+The repository SHALL document a single copy-paste `{command, args, env}`
+descriptor that an MCP host can use to register this server, and that
+descriptor SHALL contain only placeholder values for every credential
+field - the user fills in their own session token. No generator or wizard
+script SHALL be required to produce it.
+
+#### Scenario: Documented registration descriptor never embeds real credentials
+- **WHEN** the registration descriptor documented in the README is
+  inspected
+- **THEN** its credential fields are placeholder strings, and the
+  repository's leak checks reject a real token in that file
+
 ## ADDED Requirements
 
 ### Requirement: Repo-local JSON token file with committed placeholder template
