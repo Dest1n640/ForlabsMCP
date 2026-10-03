@@ -1,4 +1,7 @@
+import json
+
 import httpx
+import pytest
 import respx
 
 from forlabs_mcp.client.session import REMEMBER_COOKIE_NAME, ForlabsSession
@@ -51,24 +54,151 @@ def test_data_call_primes_xsrf_and_establishes_a_fresh_session(tmp_path) -> None
     assert sent_headers["x-xsrf-token"] == "abc="
 
 
+DATA_PATH = "/lm-vendor/repositories/sched/get_schedule"
+
+
+def _write_cache(config: ForlabsConfig, cookies: dict[str, str]) -> None:
+    config.session_path.parent.mkdir(parents=True, exist_ok=True)
+    records = [
+        {"name": name, "value": value, "domain": "bki.forlabs.ru"}
+        for name, value in cookies.items()
+    ]
+    config.session_path.write_text(json.dumps({"cookies": records}))
+
+
 @respx.mock
-def test_expired_session_token_raises_auth_error_without_any_retry(tmp_path) -> None:
+def test_rejected_session_token_raises_auth_error_after_exactly_one_retry(tmp_path) -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
     )
-    data_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
-        return_value=httpx.Response(419, json={"message": "session expired"})
+    login_post = respx.post(f"{BASE_URL}/app/login").mock(return_value=httpx.Response(500))
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        return_value=httpx.Response(401, json={"message": "Unauthenticated."})
     )
 
     session = ForlabsSession(_config(tmp_path))
 
-    try:
-        session.request("POST", "/lm-vendor/repositories/sched/get_schedule", {})
-        raise AssertionError("expected AuthError")
-    except AuthError:
-        pass
+    with pytest.raises(AuthError) as exc_info:
+        session.request("POST", DATA_PATH, {})
 
-    # Exactly one attempt at the data call - no relogin/retry.
+    assert data_route.call_count == 2
+    assert "fresh" in str(exc_info.value)
+    assert "session_token" in str(exc_info.value)
+    assert login_post.call_count == 0
+
+
+@respx.mock
+def test_persistent_csrf_mismatch_raises_auth_error_not_blaming_the_token(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        return_value=httpx.Response(419, json={"message": "CSRF token mismatch."})
+    )
+
+    session = ForlabsSession(_config(tmp_path))
+
+    with pytest.raises(AuthError) as exc_info:
+        session.request("POST", DATA_PATH, {})
+
+    assert data_route.call_count == 2
+    message = str(exc_info.value)
+    assert "CSRF" in message
+    assert "fresh" not in message
+
+
+@respx.mock
+def test_stale_cached_session_is_reset_retried_and_rewritten(tmp_path) -> None:
+    config = _config(tmp_path)
+    _write_cache(
+        config,
+        {
+            REMEMBER_COOKIE_NAME: config.session_token,
+            "XSRF-TOKEN": "stale-xsrf",
+            "forlabs_session": "stale-session",
+        },
+    )
+    prime_route = respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=fresh-xsrf; Path=/")])
+    )
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        side_effect=[
+            httpx.Response(419, json={"message": "CSRF token mismatch."}),
+            httpx.Response(
+                200,
+                json={"meta": {}},
+                headers=[("set-cookie", "forlabs_session=fresh-session; Path=/")],
+            ),
+        ]
+    )
+
+    session = ForlabsSession(config)
+    response = session.request("POST", DATA_PATH, {})
+
+    assert response.status_code == 200
+    assert prime_route.call_count == 1
+    retried = data_route.calls.last.request
+    assert retried.headers["x-xsrf-token"] == "fresh-xsrf"
+    assert "stale-session" not in retried.headers.get("cookie", "")
+    cached = config.session_path.read_text()
+    assert "stale-xsrf" not in cached
+    assert "stale-session" not in cached
+    assert "fresh-session" in cached
+
+
+@respx.mock
+def test_in_process_session_expiry_recovers_without_an_error(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        side_effect=[
+            httpx.Response(200, json={"meta": {}}),
+            httpx.Response(401, json={"message": "Unauthenticated."}),
+            httpx.Response(200, json={"meta": {}}),
+        ]
+    )
+
+    session = ForlabsSession(_config(tmp_path))
+    session.request("POST", DATA_PATH, {})
+    response = session.request("POST", DATA_PATH, {})
+
+    assert response.status_code == 200
+
+
+@respx.mock
+def test_retry_reseeds_the_configured_token_over_a_cached_one(tmp_path) -> None:
+    config = _config(tmp_path, session_token="configured-remember")
+    _write_cache(config, {REMEMBER_COOKIE_NAME: "cached-remember", "XSRF-TOKEN": "stale"})
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        side_effect=[
+            httpx.Response(419, json={"message": "CSRF token mismatch."}),
+            httpx.Response(200, json={"meta": {}}),
+        ]
+    )
+
+    session = ForlabsSession(config)
+    session.request("POST", DATA_PATH, {})
+
+    cookie_header = data_route.calls.last.request.headers.get("cookie", "")
+    assert f"{REMEMBER_COOKIE_NAME}=configured-remember" in cookie_header
+    assert "cached-remember" not in cookie_header
+
+
+@respx.mock
+def test_non_auth_failure_is_not_retried(tmp_path) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(return_value=httpx.Response(500))
+
+    session = ForlabsSession(_config(tmp_path))
+    response = session.request("POST", DATA_PATH, {})
+
+    assert response.status_code == 500
     assert data_route.call_count == 1
 
 
