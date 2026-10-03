@@ -86,10 +86,16 @@ once from their own browser (DevTools → Application/Storage → Cookies →
 configures it as `session_token` (see §7). `forlabs-mcp` seeds it into its
 cookie jar at startup and never submits a username or password anywhere.
 Ordinary data calls renew the short-lived `forlabs_session`/`XSRF-TOKEN`
-pair as a side effect. If a call ever comes back `401`/`419` it means the
-`remember_lm_<hash>` value itself was rejected (not just the short
-session) — treat this as a rare, ~5-year-horizon event requiring a fresh
-value from the browser, not a routine retry.
+pair as a side effect. A `401`/`419` usually means the short-lived pair
+went stale — in the cache file or in a long-running process — not that the
+remember cookie died: a cached ~3-day-old pair was confirmed live to get
+`419 {"message": "CSRF token mismatch."}` while the same remember cookie
+alone got `200`. So on a `401`/`419` the client drops every cookie except
+the remember cookie (re-seeded from `session_token`), re-primes
+`XSRF-TOKEN`, and retries the call exactly once. Only a repeat on that
+retry raises `AuthError`: `401` means the `remember_lm_<hash>` value itself
+was rejected (a rare, ~5-year-horizon event requiring a fresh value from
+the browser); `419` means a CSRF rejection that a new token would not fix.
 
 A leaked `remember_lm_<hash>` value grants the same practical account
 access as a leaked password, for its full measured lifetime — it is not
@@ -607,7 +613,7 @@ Module responsibilities:
 | Module | Responsibility |
 |---|---|
 | `config.py` | `ForlabsConfig` dataclass + `load_config()`. Precedence: env var > repo-local JSON token file > default. Validates and never lets a bad value reach the network layer. `redacted()` for safe logging. |
-| `client/session.py` | `ForlabsSession`: one `httpx.Client` seeded with the remember cookie, XSRF header derivation, `AuthError` on a rejected token (no re-auth), cookie jar persisted to `session_path` (mode `0600`). |
+| `client/session.py` | `ForlabsSession`: one `httpx.Client` seeded with the remember cookie, XSRF header derivation, one reset-to-remember-cookie retry on `401`/`419`, then `AuthError` (rejected token on `401`, CSRF rejection on `419`; never re-auths with credentials), cookie jar persisted to `session_path` (mode `0600`). |
 | `client/repository.py` | `Repository.call(module, action, params)`: the one RPC primitive. Raises `ProgrammingError` for anything off `READ_ONLY_ACTIONS` **before** any request; raises `UpstreamError` for non-2xx or an in-body error shape. |
 | `client/models.py` | Pydantic models (`extra="ignore"`) for `Stream`, `Study`, `ScheduleGrid`, `Lesson`, `Score`, `Task`, `TaskFile`, `Assignment`, `Identity`. |
 | `client/parsers.py` | Tolerant `payload -> model` functions; a bad row becomes a warning string, never an exception that loses the rest of the response. |
@@ -706,7 +712,7 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
 |---|---|---|
 | `ConfigError` | missing/malformed setting at startup | `key` |
 | `InvalidArgumentError` | bad tool argument, checked before any backend call | `argument` |
-| `AuthError` | session token rejected by the backend | — |
+| `AuthError` | `401`/`419` repeated after one session-reset retry: session token rejected (`401`) or CSRF rejected (`419`) | — |
 | `ConnectivityError` | host unreachable / DNS / connection reset | — |
 | `TimeoutError` | request exceeded configured timeout | — |
 | `RateLimitError` | backend rate-limited | `retry_after` |

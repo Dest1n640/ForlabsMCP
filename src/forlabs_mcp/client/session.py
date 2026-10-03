@@ -5,6 +5,10 @@ See PROJECT-REFERENCE.md §2.1-2.2 for the captured cookie shapes, and
 openspec/changes/session-token-auth/design.md for why this seeds
 `remember_lm_<hash>` (~5 year lifetime, confirmed live) instead of
 logging in with a username/password.
+
+A 401/419 is first treated as a stale short-lived session, not a dead
+token: the jar is reset to the remember cookie alone and the call retried
+once. See openspec/changes/self-heal-stale-session/design.md.
 """
 
 from __future__ import annotations
@@ -26,11 +30,13 @@ _XSRF_PRIME_PATH = "/app/login"
 # deployment, not something derived per user.
 REMEMBER_COOKIE_NAME = "remember_lm_59ba36addc2b2f9401580f014c7f58ea4e30989d"
 
-# The backend's exact "session token rejected" response shape was never
-# captured for a truly dead remember cookie; 401/419 (Laravel's usual
-# expired-session/CSRF-mismatch code) is the best-effort detection this
-# client uses until a real rejection is captured.
+# 401/419 are what Laravel returns once the short-lived session or its
+# CSRF token has expired (419 "CSRF token mismatch." confirmed live for a
+# stale cached session). Either one triggers a single reset-and-retry; only
+# a repeat on the retry is reported. A truly dead remember cookie's
+# response was never captured, so 401 on the retry is best-effort.
 _SESSION_EXPIRED_STATUSES = frozenset({401, 419})
+_CSRF_MISMATCH_STATUS = 419
 
 
 class ForlabsSession:
@@ -60,17 +66,35 @@ class ForlabsSession:
             )
         self._authenticated = True
 
+    def _reset_session(self) -> None:
+        """Drop every cookie and re-seed only the configured remember
+        cookie, so the next send primes a fresh XSRF-TOKEN and Laravel
+        mints a fresh short-lived session from the remember cookie."""
+        self._client.cookies.clear()
+        self._seed_remember_cookie()
+
     def request(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
         """Make an authenticated request.
 
         The configured remember cookie lets Laravel establish or renew the
         short-lived session cookies as a side effect of an ordinary
         request - confirmed live, no separate keep-alive call is
-        made. If the response still indicates the session token itself was
-        rejected, raises AuthError immediately - there is no credential to
-        retry with.
+        made. A 401/419 usually means those short-lived cookies (cached or
+        in memory) went stale, so the session is reset to the remember
+        cookie and the call retried exactly once. Only if the retry fails
+        the same way is AuthError raised - there is no credential to fall
+        back to.
         """
         response = self._authenticated_send(method, path, json_body)
+        if response.status_code in _SESSION_EXPIRED_STATUSES:
+            self._reset_session()
+            response = self._authenticated_send(method, path, json_body)
+        if response.status_code == _CSRF_MISMATCH_STATUS:
+            raise AuthError(
+                "Forlabs rejected the request's CSRF token even with a newly "
+                "established session. Replacing session_token will not "
+                "fix this; try again later."
+            )
         if response.status_code in _SESSION_EXPIRED_STATUSES:
             raise AuthError(
                 "Forlabs rejected the configured session_token. Obtain a fresh "
