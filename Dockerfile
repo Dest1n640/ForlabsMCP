@@ -10,14 +10,16 @@ COPY src ./src
 RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.11-alpine3.23 AS runtime
+LABEL org.opencontainers.image.source="https://github.com/Dest1n640/ForlabsMCP" \
+      org.opencontainers.image.description="Read-only MCP server for the Forlabs/Lamotivo school diary"
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    HOME=/home/forlabs \
+    HOME=/var/lib/forlabs \
     FORLABS_TOKEN_FILE=/app/forlabs-session.json
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
-RUN mkdir -p /home/forlabs/.local/state/forlabs-mcp \
-    && chown -R 65532:65532 /home/forlabs
+RUN mkdir -p /var/lib/forlabs/.local/state/forlabs-mcp \
+    && chown -R 65532:65532 /var/lib/forlabs
 USER 65532:65532
 ENTRYPOINT ["forlabs-mcp"]
