@@ -20,6 +20,8 @@ READ_ONLY_ACTIONS: frozenset[tuple[str, str]] = frozenset(
         ("learning", "get_scores"),
         ("learning", "get_tasks"),
         ("learning", "get_task"),
+        ("learning", "get_chapters"),
+        ("learning", "get_chapter"),
         ("assignments", "get_comments"),
     }
 )
@@ -43,6 +45,17 @@ class Repository:
         )
         return self._parse_response(module, action, response)
 
+    def profile_user(self) -> Any:
+        """Read the authenticated account from the app's own profile endpoint.
+
+        This is a plain app GET (not an ``lm-vendor`` RPC), so it bypasses the
+        read-only allow-list deliberately: it is the only way to learn the
+        student's own user id, needed to tell teacher feedback apart from the
+        student's own replies.
+        """
+        response = self._session.request("GET", "/app/profile/user")
+        return self._parse_response("app", "profile/user", response)
+
     def post_assignment_comment(
         self,
         *,
@@ -50,8 +63,12 @@ class Repository:
         task_id: int,
         assignment_id: int,
         message: str,
-        file_ids: list[int],
+        files: list[dict[str, Any]],
     ) -> Any:
+        # ``files`` carries the attachment OBJECTS exactly as the upload
+        # endpoint returned them (``{"attachment": {...}}``). The platform
+        # silently ignores a list of bare ids here, leaving ``attachments: []``
+        # on the posted comment; only ``uploads/store`` takes ids.
         return self._assignment_write(
             "assignments",
             "post_comment",
@@ -60,7 +77,7 @@ class Repository:
                 "task_id": task_id,
                 "assignment_id": assignment_id,
                 "message": message,
-                "files": file_ids,
+                "files": files,
                 "mode": "student",
             },
         )

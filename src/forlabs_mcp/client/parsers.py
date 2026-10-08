@@ -16,6 +16,9 @@ from pydantic import ValidationError
 from .models import (
     Assignment,
     AssignmentComment,
+    Chapter,
+    Course,
+    CurrentUser,
     Lesson,
     ScheduleGrid,
     Score,
@@ -78,3 +81,18 @@ def parse_assignment_comments(
     raw: Iterable[Mapping[str, Any]],
 ) -> PartialResult[list[AssignmentComment]]:
     return _parse_rows(raw, AssignmentComment, "assignment comment")
+
+
+def parse_chapters(raw: Iterable[Mapping[str, Any]]) -> PartialResult[list[Chapter]]:
+    return _parse_rows(raw, Chapter, "chapter")
+
+
+def parse_course(raw: Mapping[str, Any]) -> Course:
+    """A course is a single object; a malformed one has no partial subset, so
+    validate and let a bad payload raise (mirrors ``parse_schedule_grid``)."""
+    return Course.model_validate(raw)
+
+
+def parse_current_user(raw: Mapping[str, Any]) -> CurrentUser:
+    """The profile endpoint returns one user object; validate or raise."""
+    return CurrentUser.model_validate(raw)

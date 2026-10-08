@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+from datetime import date
 from typing import Any
 
 from ..config import ForlabsConfig
@@ -18,10 +19,13 @@ from ..errors import (
     ProgrammingError,
     UpstreamError,
 )
-from .models import Assignment, Identity, Stream, Study, Task, TaskFile
+from .models import Assignment, Chapter, Course, Identity, Stream, Study, Task, TaskFile
 from .parsers import (
     parse_assignment_comments,
     parse_assignments,
+    parse_chapters,
+    parse_course,
+    parse_current_user,
     parse_lessons,
     parse_schedule_grid,
     parse_scores,
@@ -87,6 +91,40 @@ def _study_to_dict(study: Study) -> dict[str, Any]:
         "tasks_count": study.tasks_count,
         "exams_count": study.exams_count,
     }
+
+
+def _date_only(value: Any) -> date | None:
+    """Return the calendar date of a Forlabs ISO timestamp, or None.
+
+    Due dates arrive as ``2026-04-01T00:00:00.000000Z`` and assessment dates
+    as ``2026-03-12`` - both must parse to a comparable ``date``.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = value.strip()
+    for separator in ("T", " "):
+        if separator in candidate:
+            candidate = candidate.split(separator, 1)[0]
+            break
+    try:
+        return date.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+
+def _require_iso_date(value: Any, *, argument: str) -> date:
+    parsed = _date_only(value)
+    if parsed is None:
+        raise InvalidArgumentError(
+            f"{argument} must be an ISO date (YYYY-MM-DD).", argument=argument
+        )
+    return parsed
+
+
+def _as_positive_int(value: Any, *, argument: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise InvalidArgumentError(f"{argument} must be a positive integer.", argument=argument)
+    return value
 
 
 class ForlabsClient:
@@ -196,21 +234,62 @@ class ForlabsClient:
     def homework(
         self,
         study_id: int | None = None,
+        *,
+        study_ids: list[int] | None = None,
         only_outstanding: bool = False,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        has_due: bool | None = None,
+        due_from: str | None = None,
+        due_to: str | None = None,
+        has_feedback: bool | None = None,
     ) -> dict[str, Any]:
+        # Reject malformed filters before any backend call at all.
+        if limit is not None:
+            limit = _as_positive_int(limit, argument="limit")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise InvalidArgumentError("offset must be a non-negative integer.", argument="offset")
+        if query is not None and not isinstance(query, str):
+            raise InvalidArgumentError("query must be text.", argument="query")
+        for name, value in (("has_due", has_due), ("has_feedback", has_feedback)):
+            if value is not None and not isinstance(value, bool):
+                raise InvalidArgumentError(f"{name} must be a boolean.", argument=name)
+
+        requested: list[int] = []
+        if study_id is not None:
+            requested.append(_as_positive_int(study_id, argument="study_id"))
+        if study_ids is not None:
+            if not isinstance(study_ids, list):
+                raise InvalidArgumentError(
+                    "study_ids must be a list of integers.", argument="study_ids"
+                )
+            requested.extend(_as_positive_int(item, argument="study_ids") for item in study_ids)
+
+        due_from_date = (
+            _require_iso_date(due_from, argument="due_from") if due_from is not None else None
+        )
+        due_to_date = _require_iso_date(due_to, argument="due_to") if due_to is not None else None
+        if due_from_date and due_to_date and due_from_date > due_to_date:
+            raise InvalidArgumentError(
+                "due_from must not be later than due_to.", argument="due_from"
+            )
+
         own_stream_id, _ = self._require_own_stream()
         studies_result = self._fetch_studies(own_stream_id)
         warnings: list[str] = list(studies_result.warnings)
         studies_by_id = {study.id: study for study in studies_result.data}
 
-        if study_id is not None and study_id not in studies_by_id:
+        deduped: list[int] = []
+        for sid in requested:
+            if sid not in deduped:
+                deduped.append(sid)
+        if any(sid not in studies_by_id for sid in deduped):
             raise InvalidArgumentError(
-                "study_id must identify one of the authenticated student's studies.",
+                "study_id/study_ids must identify the authenticated student's own studies.",
                 argument="study_id",
             )
-        target_study_ids = (
-            [study_id] if study_id is not None else [study.id for study in studies_result.data]
-        )
+        target_study_ids = deduped or [study.id for study in studies_result.data]
 
         per_study_results = [
             self._homework_for_study(own_stream_id, sid, studies_by_id) for sid in target_study_ids
@@ -219,13 +298,117 @@ class ForlabsClient:
         warnings.extend(combined.warnings)
         rows = combined.data
 
-        if only_outstanding:
-            rows = [row for row in rows if not row["is_done"]]
+        if has_feedback is not None:
+            own_user_id = self._current_user_id()
+            if own_user_id is None:
+                warnings.append(
+                    "Could not determine the authenticated user id; has_feedback was ignored."
+                )
+            else:
+                rows, feedback_warnings = self._apply_feedback_filter(
+                    rows, own_user_id=own_user_id, want=has_feedback
+                )
+                warnings.extend(feedback_warnings)
 
-        result: dict[str, Any] = {"homework": rows, "warnings": warnings}
+        rows = self._filter_homework_rows(
+            rows,
+            only_outstanding=only_outstanding,
+            query=query,
+            has_due=has_due,
+            due_from=due_from_date,
+            due_to=due_to_date,
+        )
+
+        total = len(rows)
+        if offset:
+            rows = rows[offset:]
+        if limit is not None:
+            rows = rows[:limit]
+
+        result: dict[str, Any] = {"homework": rows, "total": total, "warnings": warnings}
         if not rows:
             result["note"] = "No homework found for the given filters."
         return result
+
+    @staticmethod
+    def _filter_homework_rows(
+        rows: list[dict[str, Any]],
+        *,
+        only_outstanding: bool,
+        query: str | None,
+        has_due: bool | None,
+        due_from: date | None,
+        due_to: date | None,
+    ) -> list[dict[str, Any]]:
+        needle = query.casefold() if query else None
+
+        def keep(row: dict[str, Any]) -> bool:
+            if only_outstanding and row["is_done"]:
+                return False
+            row_due = _date_only(row.get("due_at"))
+            if has_due is True and row_due is None:
+                return False
+            if has_due is False and row_due is not None:
+                return False
+            if due_from is not None and (row_due is None or row_due < due_from):
+                return False
+            if due_to is not None and (row_due is None or row_due > due_to):
+                return False
+            if needle is not None:
+                haystack = " ".join(
+                    str(row.get(field) or "") for field in ("title", "study_name", "chapter")
+                ).casefold()
+                if needle not in haystack:
+                    return False
+            return True
+
+        return [row for row in rows if keep(row)]
+
+    def _apply_feedback_filter(
+        self, rows: list[dict[str, Any]], *, own_user_id: int, want: bool
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Keep rows by whether their thread holds a reply not written by the
+        student. Feedback lives in the response thread (``assignments/get_comments``),
+        so this costs one call per assignment that has one."""
+        kept: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        for row in rows:
+            assignment_id = row.get("assignment_id")
+            if assignment_id is None:
+                row["has_feedback"] = False
+                if want is False:
+                    kept.append(row)
+                continue
+            try:
+                comments, comment_warnings = self._assignment_comments(
+                    row["study_id"], row["task_id"], assignment_id
+                )
+            except ForlabsError as exc:
+                warnings.append(f"Failed to read feedback for assignment {assignment_id}: {exc}")
+                continue
+            warnings.extend(comment_warnings)
+            has_feedback = any(
+                isinstance(comment.get("user_id"), int)
+                and not isinstance(comment.get("user_id"), bool)
+                and comment["user_id"] != own_user_id
+                for comment in comments
+            )
+            row["has_feedback"] = has_feedback
+            if has_feedback is want:
+                kept.append(row)
+        return kept, warnings
+
+    def _current_user_id(self) -> int | None:
+        try:
+            payload = self._repository.profile_user()
+        except ForlabsError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        try:
+            return parse_current_user(payload).id
+        except ValueError:
+            return None
 
     def _homework_for_study(
         self, stream_id: int, study_id: int, studies_by_id: dict[int, Study]
@@ -262,17 +445,155 @@ class ForlabsClient:
                     "title": task.name,
                     "study_id": study_id,
                     "study_name": study.name if study is not None else None,
+                    "assignment_id": assignment.id if assignment is not None else None,
                     "status": status,
                     "is_done": status in HOMEWORK_DONE_STATUSES,
                     "credits_earned": assignment.credits if assignment is not None else None,
                     "max_credits": task.max_credits,
                     "due_at": task.due_at,
                     "assessed_at": assignment.assessed_at if assignment is not None else None,
+                    "responses_count": (
+                        assignment.responses_count if assignment is not None else None
+                    ),
                     "chapter": task.chapter_title,
                     "files": [_task_file_to_dict(file) for file in task.files],
                 }
             )
         return PartialResult(data=rows, warnings=warnings)
+
+    def study_materials(self, study_id: int, *, include_content: bool = True) -> dict[str, Any]:
+        """Course metadata plus every chapter; with ``include_content`` each
+        chapter is enriched from ``learning/get_chapter`` with its annotation,
+        HTML content and attached files (lectures, guides, templates)."""
+        study_id = _as_positive_int(study_id, argument="study_id")
+        if not isinstance(include_content, bool):
+            raise InvalidArgumentError(
+                "include_content must be a boolean.", argument="include_content"
+            )
+        own_stream_id, _ = self._require_own_stream()
+        studies_result = self._fetch_studies(own_stream_id)
+        study = next((item for item in studies_result.data if item.id == study_id), None)
+        if study is None:
+            raise InvalidArgumentError(
+                "study_id must identify one of the authenticated student's studies.",
+                argument="study_id",
+            )
+        warnings: list[str] = list(studies_result.warnings)
+
+        payload = self._repository.call(
+            "learning",
+            "get_chapters",
+            {"stream_id": str(own_stream_id), "study_id": str(study_id)},
+        )
+        if not isinstance(payload, dict):
+            raise UpstreamError("Forlabs returned a malformed chapter list.")
+        chapters_result = parse_chapters(payload.get("chapters", []) or [])
+        warnings.extend(chapters_result.warnings)
+        course: Course | None = None
+        if isinstance(payload.get("course"), dict):
+            try:
+                course = parse_course(payload["course"])
+            except ValueError:
+                warnings.append("The course header could not be parsed.")
+
+        chapters: list[dict[str, Any]] = []
+        for chapter in chapters_result.data:
+            enriched = self._chapter_to_dict(chapter)
+            if include_content and chapter.has_content:
+                try:
+                    detail_payload = self._repository.call(
+                        "learning",
+                        "get_chapter",
+                        {
+                            "stream_id": str(own_stream_id),
+                            "study_id": str(study_id),
+                            "chapter_id": str(chapter.id),
+                        },
+                    )
+                except ForlabsError as exc:
+                    warnings.append(f"Failed to fetch chapter {chapter.id} content: {exc}")
+                    chapters.append(enriched)
+                    continue
+                enriched = self._merge_chapter_detail(enriched, detail_payload, warnings)
+            chapters.append(enriched)
+
+        return {
+            "study_id": study.id,
+            "study_name": study.name,
+            "course": course.model_dump() if course is not None else None,
+            "chapters": chapters,
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    def _chapter_to_dict(chapter: Chapter) -> dict[str, Any]:
+        return {
+            "id": chapter.id,
+            "course_id": chapter.course_id,
+            "title": chapter.title,
+            "has_content": chapter.has_content,
+            "blocks_count": chapter.blocks_count,
+            "annotation": chapter.annotation,
+            "content": chapter.content,
+            "files": [_task_file_to_dict(file) for file in chapter.files],
+        }
+
+    @staticmethod
+    def _merge_chapter_detail(
+        enriched: dict[str, Any], detail_payload: Any, warnings: list[str]
+    ) -> dict[str, Any]:
+        raw = detail_payload.get("chapter") if isinstance(detail_payload, dict) else None
+        if not isinstance(raw, dict):
+            warnings.append(f"Chapter {enriched['id']} detail was malformed.")
+            return enriched
+        detail_result = parse_chapters([raw])
+        if not detail_result.data:
+            warnings.extend(detail_result.warnings)
+            return enriched
+        detail = detail_result.data[0]
+        if detail.id != enriched["id"]:
+            warnings.append(f"Chapter {enriched['id']} detail was for a different chapter.")
+            return enriched
+        merged = {**enriched}
+        merged["annotation"] = detail.annotation
+        merged["content"] = detail.content
+        # The detail payload has no `has_content` flag; keep the list value.
+        merged["blocks_count"] = detail.blocks_count
+        merged["files"] = [_task_file_to_dict(file) for file in detail.files]
+        return merged
+
+    def task_files(self, study_id: int, task_id: int) -> dict[str, Any]:
+        """The files attached to one task, for reading a template or guide
+        before starting the work. Reads the full ``learning/get_task`` detail
+        (the listing's per-task ``files`` can be empty even when the task has
+        attachments), returning only the file list."""
+        own_stream_id, study, _, _, warnings = self._own_task_context(
+            study_id, task_id, require_assignment=False
+        )
+        payload = self._repository.call(
+            "learning",
+            "get_task",
+            {
+                "stream_id": str(own_stream_id),
+                "study_id": str(study_id),
+                "task_id": str(task_id),
+            },
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("task"), dict):
+            raise UpstreamError("Forlabs returned a malformed task detail.")
+        task_result = parse_tasks([payload["task"]])
+        if not task_result.data or task_result.data[0].id != task_id:
+            raise UpstreamError("Forlabs returned a task detail for a different task.")
+        task = task_result.data[0]
+        warnings = warnings + task_result.warnings
+        return {
+            "study_id": study.id,
+            "study_name": study.name,
+            "task_id": task.id,
+            "task_title": task.name,
+            "files": [_task_file_to_dict(file) for file in task.files],
+            "warnings": warnings,
+        }
 
     def _own_task_context(
         self, study_id: int, task_id: int, *, require_assignment: bool
@@ -460,10 +781,17 @@ class ForlabsClient:
             "warnings": warnings,
         }
 
-    def _upload_attachment(self, item: PreparedFile, file_ids: list[int]) -> None:
+    def _upload_attachment(self, item: PreparedFile) -> dict[str, Any]:
+        """Upload one file and return the attachment OBJECT the backend minted.
+
+        The platform needs the whole ``{"id", "type", "disk", "uuid", ...}``
+        object in ``assignments/post_comment`` - a bare id there leaves the
+        posted comment with ``attachments: []``. ``uploads/store`` is the one
+        call that wants ids only, so the caller keeps both shapes.
+        """
         total_chunks = max(1, math.ceil(item.size / FLOW_CHUNK_SIZE))
         digest = hashlib.sha256()
-        attachment_id: int | None = None
+        attachment: dict[str, Any] | None = None
         with self._preparations.open_prepared_file(item) as file:
             for chunk_number in range(1, total_chunks + 1):
                 chunk = file.read(FLOW_CHUNK_SIZE)
@@ -502,30 +830,30 @@ class ForlabsClient:
                         payload = response.json()
                     except ValueError as exc:
                         raise UpstreamError(
-                            "Forlabs did not return the uploaded attachment identifier.",
+                            "Forlabs did not return the uploaded attachment.",
                             module="uploads",
                             action="chunk",
                         ) from exc
-                    attachment = payload.get("attachment") if isinstance(payload, dict) else None
-                    value = attachment.get("id") if isinstance(attachment, dict) else None
+                    candidate = payload.get("attachment") if isinstance(payload, dict) else None
+                    value = candidate.get("id") if isinstance(candidate, dict) else None
                     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                         raise UpstreamError(
-                            "Forlabs did not return the uploaded attachment identifier.",
+                            "Forlabs did not return the uploaded attachment.",
                             module="uploads",
                             action="chunk",
                         )
-                    attachment_id = value
-        if attachment_id is None:
+                    attachment = candidate
+        if attachment is None:
             raise UpstreamError(
-                "Forlabs did not return the uploaded attachment identifier.",
+                "Forlabs did not return the uploaded attachment.",
                 module="uploads",
                 action="chunk",
             )
-        file_ids.append(attachment_id)
         if digest.hexdigest() != item.sha256:
             raise InvalidArgumentError(
                 f"Attachment {item.name!r} changed during upload.", argument="file_paths"
             )
+        return attachment
 
     def _cleanup_uploads(self, file_ids: list[int]) -> str:
         if not file_ids:
@@ -635,9 +963,12 @@ class ForlabsClient:
         }
         initial_warnings = warnings + thread_warnings
         file_ids: list[int] = []
+        attachments: list[dict[str, Any]] = []
         try:
             for item in prepared.files:
-                self._upload_attachment(item, file_ids)
+                attachment = self._upload_attachment(item)
+                attachments.append(attachment)
+                file_ids.append(attachment["id"])
             if file_ids:
                 self._repository.store_uploads(file_ids)
         except ForlabsError:
@@ -664,7 +995,7 @@ class ForlabsClient:
                 task_id=prepared.task_id,
                 assignment_id=prepared.assignment_id,
                 message=prepared.message,
-                file_ids=file_ids,
+                files=attachments,
             )
         except ForlabsError:
             return self._submission_readback(

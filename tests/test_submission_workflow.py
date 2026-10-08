@@ -255,7 +255,9 @@ def test_attachment_upload_uses_flow_chunk_protocol_then_finalizes(tmp_path: Pat
     assert content in upload_request.content
     assert json.loads(store_route.calls.last.request.content) == {"files": [9100]}
     body = json.loads(post_route.calls.last.request.content)
-    assert body["files"] == [9100]
+    # post_comment takes the full attachment OBJECT (ids alone are ignored by
+    # the platform and leave the comment with attachments: []); store takes ids.
+    assert body["files"] == [{"id": 9100}]
     assert body["message"] == "answer"
 
 
