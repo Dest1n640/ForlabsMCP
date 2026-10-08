@@ -15,5 +15,5 @@
 
 ## 4. Publish (after merge)
 
-- [ ] 4.1 Confirm the run on `main` pushed `latest` and `sha-<short>`: `docker buildx imagetools inspect ghcr.io/dest1n640/forlabsmcp:latest` lists both `linux/amd64` and `linux/arm64`
-- [ ] 4.2 Owner, one-time: set GHCR package visibility to Public and confirm it appears under the repo's "Packages"; verify with an anonymous `docker pull` (after `docker logout ghcr.io`)
+- [x] 4.1 Confirm the run on `main` pushed `latest` and `sha-<short>`: `docker buildx imagetools inspect ghcr.io/dest1n640/forlabsmcp:latest` lists both `linux/amd64` and `linux/arm64`
+- [x] 4.2 Owner, one-time: set GHCR package visibility to Public and confirm it appears under the repo's "Packages"; verify with an anonymous `docker pull` (after `docker logout ghcr.io`)
