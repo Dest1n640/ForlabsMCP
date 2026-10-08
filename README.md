@@ -65,6 +65,42 @@ Code, Cursor и любой другой клиент, принимающий `co
 Хосты с другой обёрткой (например, `claude mcp add-json` или YAML-конфиг)
 принимают те же три поля: `command`, `args`, `env`.
 
+### Docker / Podman
+
+Сборочная стадия использует версионированный `uv`-образ на Alpine/Python
+3.11, а runtime — `python:3.11-alpine3.23` без `uv` и build tools. Установка
+идёт по `uv.lock`, dev-зависимости не попадают в итоговый образ; процесс
+запускается от непривилегированного пользователя:
+
+```bash
+docker build -t forlabs-mcp:local .
+# Или:
+podman build -t localhost/forlabs-mcp:local .
+```
+
+Регистрация образа в конфиге MCP-хоста:
+
+```json
+{
+  "mcpServers": {
+    "forlabs": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "--env", "FORLABS_SESSION_TOKEN", "forlabs-mcp:local"],
+      "env": {
+        "FORLABS_SESSION_TOKEN": "<ваш-session-token>"
+      }
+    }
+  }
+}
+```
+
+Для Podman замените `command` на `podman`, а имя образа — на
+`localhost/forlabs-mcp:local`. Флаг `-i` нужен для MCP stdio; не добавляйте
+`-t`, иначе псевдотерминал может нарушить протокол. Токен передаётся при
+запуске и не включается в образ. С `--rm` кеш сессии удаляется вместе с
+контейнером; при следующем запуске сервер создаст его заново из токена.
+
+
 ### Где взять session token
 
 1. Откройте `https://bki.forlabs.ru/app` в браузере и залогиньтесь как обычно.
