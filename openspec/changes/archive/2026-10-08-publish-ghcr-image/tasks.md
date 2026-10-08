@@ -7,7 +7,7 @@
 ## 2. Workflow
 
 - [x] 2.1 Add `.github/workflows/docker.yml` with a `test` job (setup-uv, `uv sync --frozen`, `ruff check .`, `pytest -q`) and an `image` job (`needs: test`, permissions `contents: read` + `packages: write`, QEMU + buildx, GHCR login skipped on PRs, metadata-action tags per design, build-push with `linux/amd64,linux/arm64`, gha cache, push only when not a PR); verify the YAML with `actionlint` if available, otherwise `python -c "import yaml; yaml.safe_load(open('.github/workflows/docker.yml'))"`
-- [ ] 2.2 Open the PR and verify both jobs pass and the `image` job builds without a login/push step running
+- [x] 2.2 Open the PR and verify both jobs pass and the `image` job builds without a login/push step running
 
 ## 3. Docs
 
@@ -15,5 +15,5 @@
 
 ## 4. Publish (after merge)
 
-- [ ] 4.1 Confirm the run on `main` pushed `latest` and `sha-<short>`: `docker buildx imagetools inspect ghcr.io/dest1n640/forlabsmcp:latest` lists both `linux/amd64` and `linux/arm64`
-- [ ] 4.2 Owner, one-time: set GHCR package visibility to Public and confirm it appears under the repo's "Packages"; verify with an anonymous `docker pull` (after `docker logout ghcr.io`)
+- [x] 4.1 Confirm the run on `main` pushed `latest` and `sha-<short>`: `docker buildx imagetools inspect ghcr.io/dest1n640/forlabsmcp:latest` lists both `linux/amd64` and `linux/arm64`
+- [x] 4.2 Owner, one-time: set GHCR package visibility to Public and confirm it appears under the repo's "Packages"; verify with an anonymous `docker pull` (after `docker logout ghcr.io`)
