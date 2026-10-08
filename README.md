@@ -65,6 +65,53 @@ Code, Cursor и любой другой клиент, принимающий `co
 Хосты с другой обёрткой (например, `claude mcp add-json` или YAML-конфиг)
 принимают те же три поля: `command`, `args`, `env`.
 
+### Docker / Podman
+
+Готовый образ публикуется в GitHub Container Registry для `linux/amd64` и
+`linux/arm64`: `latest` — последний коммит в `main`, `X.Y.Z` / `X.Y` —
+релизные теги. Для стабильной работы закрепите версию вместо `latest`,
+когда появятся релизы.
+
+```bash
+docker pull ghcr.io/dest1n640/forlabsmcp:latest
+```
+
+Регистрация образа в конфиге MCP-хоста:
+
+```json
+{
+  "mcpServers": {
+    "forlabs": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "--env", "FORLABS_SESSION_TOKEN", "ghcr.io/dest1n640/forlabsmcp:latest"],
+      "env": {
+        "FORLABS_SESSION_TOKEN": "<ваш-session-token>"
+      }
+    }
+  }
+}
+```
+
+Для Podman замените `command` на `podman`. Флаг `-i` нужен для MCP stdio;
+не добавляйте `-t`, иначе псевдотерминал может нарушить протокол. Токен
+передаётся при запуске и не включается в образ. С `--rm` кеш сессии
+удаляется вместе с контейнером; при следующем запуске сервер создаст его
+заново из токена.
+
+Локальная сборка вместо готового образа (сборочная стадия — версионированный
+`uv`-образ на Alpine/Python 3.11, runtime — `python:3.11-alpine3.23` без `uv`
+и build tools; установка по `uv.lock` без dev-зависимостей, процесс
+запускается от непривилегированного пользователя):
+
+```bash
+docker build -t forlabs-mcp:local .
+# Или:
+podman build -t localhost/forlabs-mcp:local .
+```
+
+Затем подставьте `forlabs-mcp:local` (или `localhost/forlabs-mcp:local` для
+Podman) вместо имени образа в `args`.
+
 ### Где взять session token
 
 1. Откройте `https://bki.forlabs.ru/app` в браузере и залогиньтесь как обычно.
