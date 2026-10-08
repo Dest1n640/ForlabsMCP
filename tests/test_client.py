@@ -557,3 +557,226 @@ def test_schedule_raw_empty_range_returns_note(tmp_path) -> None:
 
     assert result["lessons"] == []
     assert "note" in result
+
+
+def _mock_homework(tmp_path):
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+    return respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        side_effect=_tasks_side_effect_only_for_study("10823", _load("learning_get_tasks.json"))
+    )
+
+
+@respx.mock
+def test_homework_rows_carry_assignment_id_and_response_count(tmp_path) -> None:
+    _mock_homework(tmp_path)
+
+    rows = ForlabsClient(_config(tmp_path)).homework(study_id=10823)["homework"]
+
+    by_task = {row["task_id"]: row for row in rows}
+    assert by_task[5]["assignment_id"] == 940203
+    assert by_task[5]["responses_count"] == 1
+    assert by_task[41]["responses_count"] == 2
+
+
+@respx.mock
+def test_homework_query_pagination_and_total(tmp_path) -> None:
+    _mock_homework(tmp_path)
+    client = ForlabsClient(_config(tmp_path))
+
+    assert client.homework(study_id=10823)["total"] == 3
+
+    first_page = client.homework(study_id=10823, limit=2)
+    assert len(first_page["homework"]) == 2
+    assert first_page["total"] == 3
+
+    second_page = client.homework(study_id=10823, limit=2, offset=2)
+    assert [row["task_id"] for row in second_page["homework"]] == [41]
+
+    found = client.homework(study_id=10823, query="курсовой")
+    assert [row["task_id"] for row in found["homework"]] == [41]
+
+
+@respx.mock
+def test_homework_due_filters(tmp_path) -> None:
+    _mock_homework(tmp_path)
+    client = ForlabsClient(_config(tmp_path))
+
+    with_due = client.homework(study_id=10823, has_due=True)
+    assert {row["task_id"] for row in with_due["homework"]} == {5, 251}
+
+    without_due = client.homework(study_id=10823, has_due=False)
+    assert {row["task_id"] for row in without_due["homework"]} == {41}
+
+    in_range = client.homework(study_id=10823, due_from="2026-03-01", due_to="2026-03-05")
+    assert {row["task_id"] for row in in_range["homework"]} == {5}
+
+
+@respx.mock
+def test_homework_has_feedback_reads_thread_and_excludes_own_replies(tmp_path) -> None:
+    _mock_homework(tmp_path)
+    respx.get(f"{BASE_URL}/app/profile/user").mock(
+        return_value=httpx.Response(200, json=_load("profile_user.json"))
+    )
+
+    # A teacher reply (user 329) on the first assignment, the student's own
+    # reply (user 3149) on the rest.
+    def _comments(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        user_id = 329 if body["assignment_id"] == 940203 else 3149
+        return httpx.Response(
+            200,
+            json={
+                "comments": [
+                    {
+                        "id": 1,
+                        "user_id": user_id,
+                        "message": "Synthetic reply",
+                        "created_at": "2026-03-01 10:00:00",
+                        "user": {"id": user_id, "name": "Synthetic User"},
+                        "attachments": [],
+                    }
+                ]
+            },
+        )
+
+    comments_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/assignments/get_comments").mock(
+        side_effect=_comments
+    )
+    client = ForlabsClient(_config(tmp_path))
+
+    with_feedback = client.homework(study_id=10823, has_feedback=True)
+    assert [row["task_id"] for row in with_feedback["homework"]] == [5]
+    assert with_feedback["homework"][0]["has_feedback"] is True
+
+    without_feedback = client.homework(study_id=10823, has_feedback=False)
+    assert {row["task_id"] for row in without_feedback["homework"]} == {251, 41}
+    assert all(row["has_feedback"] is False for row in without_feedback["homework"])
+    assert comments_route.call_count == 6
+
+
+@respx.mock(assert_all_called=False)
+def test_homework_rejects_bad_filters_before_any_backend_call(tmp_path) -> None:
+    client = ForlabsClient(_config(tmp_path))
+
+    with pytest.raises(InvalidArgumentError):
+        client.homework(limit=0)
+    with pytest.raises(InvalidArgumentError):
+        client.homework(offset=-1)
+    with pytest.raises(InvalidArgumentError):
+        client.homework(due_from="2026-05-01", due_to="2026-03-01")
+    with pytest.raises(InvalidArgumentError):
+        client.homework(has_due="yes")  # type: ignore[arg-type]
+
+    assert len(respx.calls) == 0
+
+
+@respx.mock
+def test_homework_accepts_multiple_own_studies(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    studies_fixture = _load("learning_get_studies.json")
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=studies_fixture)
+    )
+    tasks_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_tasks.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).homework(study_ids=[10823, 8975])
+
+    assert tasks_route.call_count == 2
+    assert {json.loads(call.request.content)["study_id"] for call in tasks_route.calls} == {
+        "10823",
+        "8975",
+    }
+    assert result["total"] == len(_load("learning_get_tasks.json")["tasks"]) * 2
+
+
+@respx.mock
+def test_study_materials_merges_chapter_details_and_course(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+    chapters_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_chapters").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_chapters.json"))
+    )
+    chapter_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_chapter").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_chapter.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).study_materials(10823)
+
+    assert result["study_name"] == "Управление базами данных"
+    assert result["course"]["name"] == "Synthetic course"
+    assert [file["filename"] for file in result["course"]["files"]] == ["sample-guide.doc"]
+    assert [chapter["id"] for chapter in result["chapters"]] == [589, 590]
+    # Only the chapter that advertises content is enriched with a detail call.
+    assert result["chapters"][0]["annotation"] == "<p>Synthetic chapter annotation.</p>"
+    assert [file["filename"] for file in result["chapters"][0]["files"]] == ["sample-lecture.pdf"]
+    assert result["chapters"][1]["annotation"] is None
+    assert result["chapters"][1]["files"] == []
+    assert chapter_route.call_count == 1
+    assert json.loads(chapters_route.calls.last.request.content) == {
+        "stream_id": "205",
+        "study_id": "10823",
+    }
+    assert json.loads(chapter_route.calls.last.request.content) == {
+        "stream_id": "205",
+        "study_id": "10823",
+        "chapter_id": "589",
+    }
+
+
+@respx.mock
+def test_study_materials_without_content_skips_chapter_detail(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_chapters").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_chapters.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).study_materials(10823, include_content=False)
+
+    assert [chapter["id"] for chapter in result["chapters"]] == [589, 590]
+    assert not any(
+        str(call.request.url).split("?")[0].endswith("/learning/get_chapter")
+        for call in respx.calls
+    )
+
+
+@respx.mock
+def test_study_materials_rejects_non_own_study_before_chapter_calls(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).study_materials(999)
+
+    assert not any("/learning/get_chapters" in str(call.request.url) for call in respx.calls)
+
+
+@respx.mock
+def test_task_files_returns_files_from_task_detail(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_assignment_context()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_task").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_task.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).task_files(10823, 7001)
+
+    assert result["task_title"] == "Synthetic task"
+    assert [file["filename"] for file in result["files"]] == ["sample.txt"]
+    assert not any("/assignments/" in str(call.request.url) for call in respx.calls)

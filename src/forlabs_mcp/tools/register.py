@@ -47,10 +47,45 @@ def register_tools(
     @server.tool()
     def homework(
         study_id: int | None = None,
+        study_ids: list[int] | None = None,
         only_outstanding: bool = False,
+        query: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        has_due: bool | None = None,
+        due_from: str | None = None,
+        due_to: str | None = None,
+        has_feedback: bool | None = None,
     ) -> dict[str, Any]:
         try:
-            return client_factory().homework(study_id=study_id, only_outstanding=only_outstanding)
+            return client_factory().homework(
+                study_id=study_id,
+                study_ids=study_ids,
+                only_outstanding=only_outstanding,
+                query=query,
+                limit=limit,
+                offset=offset,
+                has_due=has_due,
+                due_from=due_from,
+                due_to=due_to,
+                has_feedback=has_feedback,
+            )
+        except ForlabsError as exc:
+            raise ToolError(to_tool_error(exc)) from exc
+
+    @server.tool()
+    def study_materials(study_id: int, include_content: bool = True) -> dict[str, Any]:
+        try:
+            return client_factory().study_materials(
+                study_id=study_id, include_content=include_content
+            )
+        except ForlabsError as exc:
+            raise ToolError(to_tool_error(exc)) from exc
+
+    @server.tool()
+    def task_files(study_id: int, task_id: int) -> dict[str, Any]:
+        try:
+            return client_factory().task_files(study_id=study_id, task_id=task_id)
         except ForlabsError as exc:
             raise ToolError(to_tool_error(exc)) from exc
 

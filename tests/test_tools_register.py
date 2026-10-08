@@ -55,6 +55,8 @@ def test_only_schedule_and_own_scope_read_tools_are_registered_by_default(
         "schedule",
         "grades",
         "homework",
+        "study_materials",
+        "task_files",
         "assignment_details",
         "assignment_thread",
         "preview_assignment_response",
@@ -64,6 +66,18 @@ def test_only_schedule_and_own_scope_read_tools_are_registered_by_default(
     assert "stream_id" not in properties["grades"]
     assert "stream_id" not in properties["homework"]
     assert "stream_id" in properties["schedule"]
+    assert {
+        "query",
+        "limit",
+        "offset",
+        "study_ids",
+        "has_due",
+        "due_from",
+        "due_to",
+        "has_feedback",
+    } <= set(properties["homework"])
+    assert set(properties["study_materials"]) == {"study_id", "include_content"}
+    assert set(properties["task_files"]) == {"study_id", "task_id"}
 
 
 def test_submit_tool_is_opt_in_and_marked_as_non_idempotent_write(tmp_path) -> None:

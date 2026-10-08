@@ -1,0 +1,33 @@
+{
+  "course_id": 245,
+  "chapter": {
+    "id": 589,
+    "course_id": 245,
+    "title": "Synthetic chapter one",
+    "annotation": "<p>Synthetic chapter annotation.</p>",
+    "content": null,
+    "blocks_count": 1,
+    "files": [
+      {
+        "id": 844016,
+        "type": "document",
+        "status": 1,
+        "disk": "storage",
+        "directory": "files",
+        "uuid": "00000000-0000-0000-0000-000000000002",
+        "filename": "sample-lecture.pdf",
+        "description": null,
+        "mime_type": "application/pdf",
+        "size": 1762590,
+        "width": 0,
+        "height": 0,
+        "sort": 1000,
+        "created_at": "2026-01-02 18:21:26",
+        "url": "https://example.invalid/sample-lecture.pdf",
+        "preview": null,
+        "thumbnail": null,
+        "human_size": "1,68 МБ"
+      }
+    ]
+  }
+}

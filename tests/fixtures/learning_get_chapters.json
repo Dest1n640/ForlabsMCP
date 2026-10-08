@@ -1,0 +1,54 @@
+{
+  "chapters": [
+    {
+      "id": 589,
+      "course_id": 245,
+      "title": "Synthetic chapter one",
+      "has_content": true,
+      "blocks_count": 1,
+      "pivot_sort": 1,
+      "pivot_status": 1
+    },
+    {
+      "id": 590,
+      "course_id": 245,
+      "title": "Synthetic chapter two",
+      "has_content": false,
+      "blocks_count": 0,
+      "pivot_sort": 2,
+      "pivot_status": 1
+    }
+  ],
+  "course": {
+    "id": 245,
+    "name": "Synthetic course",
+    "comment": null,
+    "title": null,
+    "annotation": null,
+    "questions": null,
+    "sources": null,
+    "files": [
+      {
+        "id": 21837,
+        "type": "document",
+        "status": 1,
+        "disk": "storage",
+        "directory": null,
+        "uuid": "00000000-0000-0000-0000-000000000001",
+        "filename": "sample-guide.doc",
+        "description": null,
+        "mime_type": "application/msword",
+        "size": 321536,
+        "width": 0,
+        "height": 0,
+        "sort": 10,
+        "created_at": "2026-01-01 12:00:00",
+        "url": "https://example.invalid/sample-guide.doc",
+        "preview": null,
+        "thumbnail": null,
+        "human_size": "314,00 КБ"
+      }
+    ]
+  },
+  "passed_counts": []
+}

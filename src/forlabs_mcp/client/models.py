@@ -146,3 +146,44 @@ class AssignmentComment(_ForlabsModel):
     created_at: str | None = None
     user: dict[str, Any] | None = None
     attachments: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class CurrentUser(_ForlabsModel):
+    """The authenticated account, from ``GET /app/profile/user``.
+
+    Only the identity fields are modeled; the endpoint also returns roles,
+    permissions and enrolment data that this client does not need.
+    """
+
+    id: int
+    name: str | None = None
+    email: str | None = None
+
+
+class Course(_ForlabsModel):
+    """A course's own metadata and attached materials (``learning/get_chapters``)."""
+
+    id: int
+    name: str | None = None
+    comment: str | None = None
+    title: str | None = None
+    annotation: str | None = None
+    questions: Any | None = None
+    sources: Any | None = None
+    files: list[TaskFile] = Field(default_factory=list)
+
+
+class Chapter(_ForlabsModel):
+    """A course chapter. The list call omits ``annotation``/``content``/``files``;
+
+    those are merged in from ``learning/get_chapter`` when details are requested.
+    """
+
+    id: int
+    course_id: int | None = None
+    title: str
+    annotation: str | None = None
+    content: str | None = None
+    has_content: bool = False
+    blocks_count: int = 0
+    files: list[TaskFile] = Field(default_factory=list)

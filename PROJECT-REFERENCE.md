@@ -134,8 +134,16 @@ learning/get_studies
 learning/get_scores
 learning/get_tasks
 learning/get_task
+learning/get_chapters
+learning/get_chapter
 assignments/get_comments
 ```
+
+One read deliberately bypasses this list: `GET /app/profile/user` (see the
+`app/profile/user` endpoint below) is a plain app GET, not an `lm-vendor` RPC,
+and is the only way to learn the authenticated student's own user id — used by
+the `has_feedback` homework filter to tell teacher replies apart from the
+student's own.
 
 `learning/get_streams` is on the allow-list (observed in traffic) but the
 current client does not call it: it returns only the authenticated student's
@@ -630,6 +638,131 @@ authenticated student's own stream, including student-specific fields.
 Do not expose those fields or treat this endpoint as the schedule group
 catalog; schedule group options come from `sched/get_schedule.streams`.
 
+### `learning/get_chapters`
+
+Request body: `{ "stream_id": "187", "study_id": "10823" }` (string values, as
+the SPA sends route params).
+
+```json
+{
+  "chapters": [
+    {
+      "id": 589,
+      "course_id": 245,
+      "title": "Synthetic chapter one",
+      "has_content": true,
+      "blocks_count": 1,
+      "pivot_sort": 1,
+      "pivot_status": 1
+    }
+  ],
+  "course": {
+    "id": 245,
+    "name": "Synthetic course",
+    "comment": null,
+    "title": null,
+    "annotation": null,
+    "questions": null,
+    "sources": null,
+    "files": [
+      {
+        "id": 21837,
+        "type": "document",
+        "status": 1,
+        "disk": "storage",
+        "directory": null,
+        "uuid": "00000000-0000-0000-0000-000000000001",
+        "filename": "sample-guide.doc",
+        "description": null,
+        "mime_type": "application/msword",
+        "size": 321536,
+        "width": 0,
+        "height": 0,
+        "sort": 10,
+        "created_at": "2026-01-01 12:00:00",
+        "url": "https://example.invalid/sample-guide.doc",
+        "preview": null,
+        "thumbnail": null,
+        "human_size": "314,00 КБ"
+      }
+    ]
+  },
+  "passed_counts": []
+}
+```
+
+Returns the course header (with its own attached `files`) and the chapter list.
+`has_content` marks the chapters that carry their own annotation/content/files;
+`blocks_count` counts interactive blocks. `passed_counts` is a per-chapter
+progress list the client does not model.
+
+### `learning/get_chapter`
+
+Request body: `{ "stream_id": "187", "study_id": "10823", "chapter_id": "589" }`
+
+```json
+{
+  "course_id": 245,
+  "chapter": {
+    "id": 589,
+    "course_id": 245,
+    "title": "Synthetic chapter one",
+    "annotation": "<p>Synthetic chapter annotation.</p>",
+    "content": null,
+    "blocks_count": 1,
+    "files": [
+      {
+        "id": 844016,
+        "type": "document",
+        "status": 1,
+        "disk": "storage",
+        "directory": "files",
+        "uuid": "00000000-0000-0000-0000-000000000002",
+        "filename": "sample-lecture.pdf",
+        "description": null,
+        "mime_type": "application/pdf",
+        "size": 1762590,
+        "width": 0,
+        "height": 0,
+        "sort": 1000,
+        "created_at": "2026-01-02 18:21:26",
+        "url": "https://example.invalid/sample-lecture.pdf",
+        "preview": null,
+        "thumbnail": null,
+        "human_size": "1,68 МБ"
+      }
+    ]
+  }
+}
+```
+
+The detail chapter carries `annotation`/`content`/`files` but **no
+`has_content`** flag — keep the list value when merging.
+
+### `app/profile/user` (plain app GET, not an `lm-vendor` RPC)
+
+```
+GET https://bki.forlabs.ru/app/profile/user
+X-XSRF-TOKEN: <decoded XSRF-TOKEN cookie value>
+Accept: application/json
+```
+
+```json
+{
+  "id": 3149,
+  "name": "Synthetic Student",
+  "email": "student@example.invalid",
+  "gender": null,
+  "roles": [],
+  "students": []
+}
+```
+
+Returns the authenticated account (also permissions, roles and enrolment data
+this client ignores). Its only use here is the numeric `id`, which the
+`has_feedback` homework filter compares against each comment's `user_id` to
+recognise a reply that is not the student's own.
+
 ## 4. Architecture
 
 ```
@@ -725,14 +858,40 @@ study: `scores[] {study_id, study_name, credits, status, status_label,
 grade?, name_note?}`, `warnings[]`, optional `note`. `status_label` uses
 `SCORE_STATUS_LABELS = {1: "in progress", 2: "in progress", 5: "completed"}`.
 
-### `homework(study_id?: int, only_outstanding?: bool)`
+### `homework(study_id?, study_ids?, only_outstanding?, query?, limit?, offset?, has_due?, due_from?, due_to?, has_feedback?)`
 
-Without `study_id`, iterates every own study (one `learning/get_tasks` call
-each); a per-study failure becomes a warning. An explicit study must also
-belong to the authenticated student. Returns `homework[] {task_id, title,
-study_id, study_name, status, is_done, credits_earned?, max_credits?, due_at?,
-assessed_at?, chapter?, files?}`, `warnings[]`, optional `note`.
+Without `study_id`/`study_ids`, iterates every own study (one
+`learning/get_tasks` call each); a per-study failure becomes a warning. An
+explicit study must belong to the authenticated student. Returns `homework[]
+{task_id, title, study_id, study_name, assignment_id, status, is_done,
+credits_earned?, max_credits?, due_at?, assessed_at?, responses_count?,
+chapter?, files?, has_feedback?}`, `total`, `warnings[]`, optional `note`.
 `is_done` means `status in {3}`.
+
+Filters: `study_ids` selects several own studies at once; `query` matches
+title/study/chapter case-insensitively; `limit`/`offset` paginate (the unfiltered
+count is returned as `total`); `has_due` / `due_from` / `due_to` filter by due
+date; `has_feedback` keeps tasks whose response thread holds a reply not written
+by the student (fetching `GET /app/profile/user` for the student's id, then
+`assignments/get_comments` per assignment). Malformed filter values raise an
+invalid-argument error before any backend call.
+
+### `study_materials(study_id: int, include_content?: bool)`
+
+Materials for one own study. Returns `study_id`, `study_name`, the course header
+(`course {id, name, annotation, files[]}`), and `chapters[] {id, course_id,
+title, has_content, blocks_count, annotation, content, files[]}`, plus
+`warnings[]`. `learning/get_chapters` supplies the list; with
+`include_content=true` (the default) each chapter that advertises content is
+enriched from `learning/get_chapter` with its annotation, HTML content and files
+(lectures, guides, templates). A per-chapter failure becomes a warning.
+
+### `task_files(study_id: int, task_id: int)`
+
+Files attached to one own task. Returns `study_id`, `study_name`, `task_id`,
+`task_title`, `files[]`, `warnings[]`. Uses the full `learning/get_task` detail
+(the listing's per-task `files` can be empty even when the task has
+attachments).
 
 ### `assignment_details(study_id: int, task_id: int)`
 

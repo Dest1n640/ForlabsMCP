@@ -8,7 +8,7 @@ import pytest
 from forlabs_mcp.server import build_server
 
 
-def test_build_server_registers_eight_safe_tools_without_loading_config(
+def test_build_server_registers_safe_tools_without_loading_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FORLABS_SESSION_TOKEN", raising=False)
@@ -23,6 +23,8 @@ def test_build_server_registers_eight_safe_tools_without_loading_config(
         "schedule",
         "grades",
         "homework",
+        "study_materials",
+        "task_files",
         "assignment_details",
         "assignment_thread",
         "preview_assignment_response",
