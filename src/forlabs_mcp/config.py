@@ -31,6 +31,8 @@ _ENV_TZ = "FORLABS_TZ"
 _ENV_SESSION_PATH = "FORLABS_SESSION_PATH"
 _ENV_MAX_ITEMS = "FORLABS_MAX_ITEMS"
 _ENV_TOKEN_FILE = "FORLABS_TOKEN_FILE"
+_ENV_ASSIGNMENT_SUBMISSION = "FORLABS_ENABLE_ASSIGNMENT_SUBMISSION"
+_ENV_UPLOAD_ROOT = "FORLABS_UPLOAD_ROOT"
 
 # Repo root, resolved from the package location so it does not depend on
 # the working directory the MCP host starts the server in.
@@ -53,6 +55,8 @@ class ForlabsConfig:
     timezone: str = DEFAULT_TZ
     session_path: Path = Path(DEFAULT_SESSION_PATH).expanduser()
     max_items: int = DEFAULT_MAX_ITEMS
+    assignment_submission_enabled: bool = False
+    upload_root: Path | None = None
 
     def redacted(self) -> dict[str, object]:
         """Return this config as a dict safe to log: the session token is masked."""
@@ -63,7 +67,31 @@ class ForlabsConfig:
             "timezone": self.timezone,
             "session_path": str(self.session_path),
             "max_items": self.max_items,
+            "assignment_submission_enabled": self.assignment_submission_enabled,
+            "upload_root_configured": self.upload_root is not None,
         }
+
+
+def assignment_submission_enabled_from_env() -> bool:
+    """Read the opt-in switch without loading credentials or the token file."""
+    value = os.environ.get(_ENV_ASSIGNMENT_SUBMISSION, "").strip().lower()
+    if not value or _UNEXPANDED_PLACEHOLDER.search(value):
+        return False
+    if value in {"1", "true"}:
+        return True
+    if value in {"0", "false"}:
+        return False
+    raise ConfigError(
+        f"{_ENV_ASSIGNMENT_SUBMISSION} must be 'true' or 'false'.",
+        key=_ENV_ASSIGNMENT_SUBMISSION,
+    )
+
+
+def _upload_root_from_env() -> Path | None:
+    value = os.environ.get(_ENV_UPLOAD_ROOT, "").strip()
+    if not value or _UNEXPANDED_PLACEHOLDER.search(value):
+        return None
+    return Path(value).expanduser()
 
 
 def _token_file_path() -> Path:
@@ -104,9 +132,7 @@ def load_config() -> ForlabsConfig:
     def resolve(key: str, env_var: str, default: object) -> object:
         env_value = os.environ.get(env_var)
         if env_value and _UNEXPANDED_PLACEHOLDER.search(env_value):
-            logger.warning(
-                "%s contains an unexpanded ${...} placeholder; ignoring it.", env_var
-            )
+            logger.warning("%s contains an unexpanded ${...} placeholder; ignoring it.", env_var)
         elif env_value:
             return env_value
         if key in file_table:
@@ -134,4 +160,6 @@ def load_config() -> ForlabsConfig:
         timezone=timezone,
         session_path=session_path,
         max_items=max_items,
+        assignment_submission_enabled=assignment_submission_enabled_from_env(),
+        upload_root=_upload_root_from_env(),
     )

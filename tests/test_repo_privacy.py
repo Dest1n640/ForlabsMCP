@@ -33,5 +33,18 @@ def test_gitignored_token_file_is_not_scanned() -> None:
     assert "forlabs-session.json" not in tracked_paths()
 
 
+def test_workflow_fixtures_are_anonymized() -> None:
+    fixture_names = [
+        "sched_get_schedule_groups.json",
+        "learning_get_streams.json",
+        "learning_get_task.json",
+        "learning_get_tasks_assignments.json",
+        "assignments_get_comments.json",
+    ]
+    for name in fixture_names:
+        path = REPO_ROOT / "tests" / "fixtures" / name
+        assert scan_text(str(path.relative_to(REPO_ROOT)), path.read_text()) == []
+
+
 def test_synthetic_names_are_allowed() -> None:
     assert scan_text("f.json", '{"lecturer_name": "Кравцова Наталья Игоревна"}') == []

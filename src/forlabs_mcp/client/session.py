@@ -14,6 +14,7 @@ once. See openspec/changes/self-heal-stale-session/design.md.
 from __future__ import annotations
 
 import json
+from typing import Any
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -73,38 +74,69 @@ class ForlabsSession:
         self._client.cookies.clear()
         self._seed_remember_cookie()
 
-    def request(self, method: str, path: str, json_body: dict | None = None) -> httpx.Response:
-        """Make an authenticated request.
+    def request(
+        self,
+        method: str,
+        path: str,
+        json_body: dict | None = None,
+        *,
+        params: dict[str, str | int] | None = None,
+        data: dict[str, str | int] | None = None,
+        files: dict[str, tuple[str, Any, str]] | None = None,
+        retry_auth: bool = True,
+    ) -> httpx.Response:
+        """Make an authenticated request with optional safe-auth retry.
 
-        The configured remember cookie lets Laravel establish or renew the
-        short-lived session cookies as a side effect of an ordinary
-        request - confirmed live, no separate keep-alive call is
-        made. A 401/419 usually means those short-lived cookies (cached or
-        in memory) went stale, so the session is reset to the remember
-        cookie and the call retried exactly once. Only if the retry fails
-        the same way is AuthError raised - there is no credential to fall
-        back to.
+        Read calls retain the single 401/419 session reset. Non-idempotent
+        assignment writes pass ``retry_auth=False`` so this layer never
+        resends an operation whose outcome could be ambiguous.
         """
-        response = self._authenticated_send(method, path, json_body)
-        if response.status_code in _SESSION_EXPIRED_STATUSES:
+        response = self._authenticated_send(
+            method, path, json_body, params=params, data=data, files=files
+        )
+        if retry_auth and response.status_code in _SESSION_EXPIRED_STATUSES:
             self._reset_session()
-            response = self._authenticated_send(method, path, json_body)
+            response = self._authenticated_send(
+                method, path, json_body, params=params, data=data, files=files
+            )
         if response.status_code == _CSRF_MISMATCH_STATUS:
-            raise AuthError(
-                "Forlabs rejected the request's CSRF token even with a newly "
-                "established session. Replacing session_token will not "
-                "fix this; try again later."
-            )
+            if retry_auth:
+                message = (
+                    "Forlabs rejected the request's CSRF token after resetting the session. "
+                    "Replacing session_token will not fix this; try again later."
+                )
+            else:
+                message = (
+                    "Forlabs rejected the request's CSRF token. The non-idempotent "
+                    "request was not retried; inspect the remote state before retrying."
+                )
+            raise AuthError(message)
         if response.status_code in _SESSION_EXPIRED_STATUSES:
-            raise AuthError(
-                "Forlabs rejected the configured session_token. Obtain a fresh "
-                f"{REMEMBER_COOKIE_NAME!r} cookie value from your browser and "
-                "update your configuration."
-            )
+            if retry_auth:
+                message = (
+                    "Forlabs rejected the configured session_token. Obtain a fresh "
+                    f"{REMEMBER_COOKIE_NAME!r} cookie value from your browser and "
+                    "update your configuration."
+                )
+            else:
+                message = (
+                    "Forlabs rejected the authenticated request. The non-idempotent "
+                    "request was not retried; inspect the remote state before retrying."
+                )
+            raise AuthError(message)
         self._persist_session()
         return response
 
-    def _authenticated_send(self, method: str, path: str, json_body: dict | None) -> httpx.Response:
+    def _authenticated_send(
+        self,
+        method: str,
+        path: str,
+        json_body: dict | None,
+        *,
+        params: dict[str, str | int] | None = None,
+        data: dict[str, str | int] | None = None,
+        files: dict[str, tuple[str, Any, str]] | None = None,
+    ) -> httpx.Response:
         token = self._xsrf_token()
         if token is None:
             # No XSRF-TOKEN cookie yet this process (cold start) - prime it.
@@ -114,6 +146,9 @@ class ForlabsSession:
             method,
             path,
             json_body=json_body,
+            params=params,
+            data=data,
+            files=files,
             extra_headers={"Accept": "application/json", "X-XSRF-TOKEN": token or ""},
         )
 
@@ -134,11 +169,20 @@ class ForlabsSession:
         path: str,
         *,
         json_body: dict | None = None,
+        params: dict[str, str | int] | None = None,
+        data: dict[str, str | int] | None = None,
+        files: dict[str, tuple[str, Any, str]] | None = None,
         extra_headers: dict | None = None,
     ) -> httpx.Response:
-        kwargs: dict = {"headers": extra_headers or {}}
+        kwargs: dict[str, Any] = {"headers": extra_headers or {}}
         if json_body is not None:
             kwargs["json"] = json_body
+        if params is not None:
+            kwargs["params"] = params
+        if data is not None:
+            kwargs["data"] = data
+        if files is not None:
+            kwargs["files"] = files
         try:
             return self._client.request(method, path, **kwargs)
         except httpx.TimeoutException as exc:

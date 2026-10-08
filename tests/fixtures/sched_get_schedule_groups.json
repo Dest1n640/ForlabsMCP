@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "type": "stream",
+    "is_own": true,
+    "stream_ids": [210]
+  },
+  "streams": [
+    {"id": 210, "name": "Synthetic own group"},
+    {"id": 211, "name": "Synthetic schedule group"}
+  ],
+  "entries": []
+}

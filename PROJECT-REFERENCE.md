@@ -9,10 +9,11 @@ fixture data — safe to reuse in a fresh repo under any account.
 
 A local [MCP](https://modelcontextprotocol.io) server (`forlabs-mcp`) that logs
 into the Forlabs/Lamotivo school-diary SPA at `https://bki.forlabs.ru/app` as a
-student, and exposes four **read-only** tools — `reference`, `schedule`,
-`grades`, `homework` — so an MCP-capable assistant can answer questions against
-a real diary. Nothing is ever written back to Forlabs; the only file the
-server writes locally is a session-cookie cache (mode `0600`).
+student. It registers eight safe tools for schedules, own subjects, tasks, and
+assignment responses; an additional non-idempotent response-write tool is
+registered only when explicitly enabled. The generic RPC path is read-only;
+submission uses a separate fixed, opt-in lane. No exam workflows, grading
+writes, attendance changes, edits, or arbitrary backend writes are exposed.
 
 ## 2. Forlabs (Lamotivo) protocol
 
@@ -122,8 +123,8 @@ keys) or a non-2xx status; treat both as an application error.
 
 ### 2.4 Read-only allow-list
 
-These are the only `(module, action)` pairs a read-only client should ever
-call for the student role — reject everything else *before* any HTTP request:
+The read-only repository allow-list contains these student-role calls; reject
+every other action *before* any HTTP request:
 
 ```
 sched/get_grid
@@ -132,17 +133,19 @@ learning/get_streams
 learning/get_studies
 learning/get_scores
 learning/get_tasks
+learning/get_task
+assignments/get_comments
 ```
 
 `learning/get_streams` is on the allow-list (observed in traffic) but the
-current client never actually calls it — the account's own stream and the
-full stream list are already present in `sched/get_schedule`'s response
-(`meta.stream_ids`, `streams[]`), so a separate call is redundant for the
-current tool set.
+current client does not call it: it returns only the authenticated student's
+own stream. The schedule endpoint supplies the selectable group catalog in
+`streams[]`; that catalog is not a subject list.
 
-Write actions on other Lamotivo modules (`assignments/post_comment`,
-`assignments/post_assessment`, `study_students/save_attendance`, …) must never
-be added to this list.
+Assignment writes use separate dedicated methods, never this allow-list:
+`assignments/post_comment`, `uploads/store`, `uploads/delete`, and the fixed
+FlowJS upload route. No assessment, attendance, edit, delete, or arbitrary
+RPC write path is available.
 
 ## 3. Full request/response JSON per endpoint
 
@@ -188,8 +191,14 @@ alternating week layouts (2 = a two-week rotating schedule).
 
 ### `sched/get_schedule`
 
-Request body: `{}` (the SPA passes no explicit `stream_id`; `{}` returns the
-account's own stream).
+The authenticated own-schedule request is `{}`; the live SPA also uses
+`{"stream_id": 0}` for its default and `{"stream_id": <integer>}` for a
+selected group. Empty-body and selected-group requests both succeeded live.
+The response's `meta.stream_ids` marks the student's own group(s);
+`streams[]` contains all schedule-selectable groups (42 in the captured
+response), while `entries[]` is for the requested schedule. In contrast,
+`learning/get_streams` returned a single own stream with student metadata;
+it is not the source for schedule group options.
 
 ```json
 {
@@ -560,69 +569,105 @@ are strings**, not integers, unlike every other endpoint's `stream_id`.
 - `pivot_cost` = max points for the task; `pivot_end_at` = due date (ISO
   8601, nullable).
 
+### Assignment workflow endpoint shapes
+
+#### `learning/get_task`
+
+Request body: all identifiers are strings:
+`{"stream_id": "210", "study_id": "7210", "task_id": "7001"}`.
+
+Response shape: `{"task": <task>, "assignment": <assignment>}`. The task
+object uses the `learning/get_tasks` fields above; the assignment object
+uses the fields in `assignments[]`. The implementation validates task
+ownership against the own-study `learning/get_tasks` result before asking
+for this detail.
+
+#### `assignments/get_comments`
+
+Request body uses mixed types:
+`{"study_id": "7210", "task_id": 7001, "assignment_id": 8001}`.
+The response is `{"comments": [...]}`; an empty comments array is valid.
+Captured comment objects include `id`, `user_id`, `message`, `created_at`,
+`user`, and `attachments`. Fixtures use synthetic authors and messages.
+
+#### Assignment response writes (deployed frontend source)
+
+Creating a new response calls
+`assignments/post_comment({study_id, task_id, assignment_id, message,
+files, mode})`; the UI's `id` field is omitted for a new response and its
+student mode is `"student"`. File IDs are finalized with
+`uploads/store({"files": [<id>, ...]})`; UI cancellation removes them with
+`uploads/delete({"files": [<id>, ...]})`.
+
+The assignment UI uses FlowJS at `/lm-vendor/upload`. Deployed source
+(`lm-app-*.js` + the ng-flow library in `lm-vendor-*.js`) confirms:
+`flowFactoryProvider.defaults` targets `lmVendorPrefix + '/upload'`, sends
+`X-XSRF-TOKEN` (`Cookies.get('XSRF-TOKEN')`) on every request, and keeps the
+library defaults `chunkSize: 1048576` (1 MiB), `fileParameterName: "file"`,
+`testChunks: true` (a `GET` preflight per chunk), and
+`successStatuses: [200, 201, 202]`. The multipart `file` field carries the
+original filename, alongside FlowJS `flowChunk*`, `flowTotal*`, and
+`flowIdentifier` fields. A live read-only `GET` preflight with a random
+`flowIdentifier` returned `204` (chunk absent), matching the client's
+"proceed only on 204" rule.
+
+The final chunk response is JSON whose `attachment` object is the uploaded
+file record: the dialog's `flow-file-success` handler does
+`JSON.parse($message).attachment` and pushes it into the message's file list,
+and those records' `id`s become the `files` array. Confirming the dialog runs
+`uploads/store({"files": [<id>, ...]})` before `post_comment`, and detaching
+or cancelling a file runs `uploads/delete({"files": [<id>, ...]})`.
+The task dialog limits each attachment to 50 MiB (`max_size = 50 * 1024` KB)
+and permits any extension. This upload sequence is confirmed from deployed
+source, not from a live file upload. The only authorized live write is one
+text-only `.` response to the user's first own 1C assignment; do not upload a
+file.
+
+### `learning/get_streams`
+
+The captured response has a top-level `streams` array containing only the
+authenticated student's own stream, including student-specific fields.
+Do not expose those fields or treat this endpoint as the schedule group
+catalog; schedule group options come from `sched/get_schedule.streams`.
+
 ## 4. Architecture
 
 ```
-+-----------------------------------------------------------------+
-|  server.py            MCPServer("forlabs"), stdio transport      |
-|    - loads ForlabsConfig via config.load_config()                |
-|    - builds one lazily-created ForlabsClient (client_factory)     |
-+------------------------------+-----------------------------------+
-                                |
-+------------------------------v-----------------------------------+
-|  tools/register.py    4 MCP tools: reference, grades, homework,   |
-|                        schedule. Each: validate args -> call      |
-|                        client -> catch ForlabsError -> ToolError  |
-+------------------------------+-----------------------------------+
-                                |
-+------------------------------v-----------------------------------+
-|  client/client.py     ForlabsClient (domain layer): joins studies |
-|                        to scores/tasks, resolves "own stream",    |
-|                        returns Reference / ScoreRow / HomeworkRow |
-+------------------------------+-----------------------------------+
-                                |
-        +-----------------------+------------------------+
-        |                                                |
-+-------v---------+                            +---------v----------+
-| dates.py         |                            | client/parsers.py   |
-| resolve_range,    |                            | payload -> typed    |
-| resolve_lessons   |<---------------------------| models + warnings   |
-| (calendar math)   |    client/models.py         | (PartialResult)     |
-+-------------------+    (pydantic, extra=ignore) +---------+----------+
-                                                             |
-                                                  +----------v----------+
-                                                  | client/repository.py |
-                                                  | allow-listed RPC:     |
-                                                  | POST .../<module>/    |
-                                                  | <action>              |
-                                                  +----------+-----------+
-                                                             |
-                                                  +----------v-----------+
-                                                  | client/session.py     |
-                                                  | httpx.Client, remember |
-                                                  | cookie, XSRF header,   |
-                                                  | cookie                 |
-                                                  | persistence (0600)     |
-                                                  +----------+-----------+
-                                                             |
-                                                  https://bki.forlabs.ru
+MCP stdio
+  -> server.py
+     -> tools/register.py (8 default tools; submit tool only when opted in)
+        -> ForlabsClient (own-study scope, schedule group selection,
+           assignment details/thread, one-use response preview/submit)
+           -> dates.py / parsers.py / models.py
+           -> client/submissions.py (preview state, file scope and integrity)
+           -> client/repository.py
+              -> read-only RPC allow-list
+              -> fixed, gated assignment-write methods
+                 -> client/session.py (XSRF/session cookies, no write retry)
+                    -> https://bki.forlabs.ru
 ```
+
+Reads and writes share the authenticated session, but not the RPC policy:
+the generic repository call can invoke only the read allow-list; the
+submission lane has fixed operations and cannot accept arbitrary modules,
+actions, IDs, modes, or local paths from a submit call.
 
 Module responsibilities:
 
 | Module | Responsibility |
 |---|---|
-| `config.py` | `ForlabsConfig` dataclass + `load_config()`. Precedence: env var > repo-local JSON token file > default. Validates and never lets a bad value reach the network layer. `redacted()` for safe logging. |
-| `client/session.py` | `ForlabsSession`: one `httpx.Client` seeded with the remember cookie, XSRF header derivation, one reset-to-remember-cookie retry on `401`/`419`, then `AuthError` (rejected token on `401`, CSRF rejection on `419`; never re-auths with credentials), cookie jar persisted to `session_path` (mode `0600`). |
-| `client/repository.py` | `Repository.call(module, action, params)`: the one RPC primitive. Raises `ProgrammingError` for anything off `READ_ONLY_ACTIONS` **before** any request; raises `UpstreamError` for non-2xx or an in-body error shape. |
-| `client/models.py` | Pydantic models (`extra="ignore"`) for `Stream`, `Study`, `ScheduleGrid`, `Lesson`, `Score`, `Task`, `TaskFile`, `Assignment`, `Identity`. |
-| `client/parsers.py` | Tolerant `payload -> model` functions; a bad row becomes a warning string, never an exception that loses the rest of the response. |
-| `client/partial.py` | `PartialResult[T]` — `data` + `warnings` + `is_partial`. The vocabulary every layer above uses to say "here's what I got, and here's what's incomplete." |
-| `client/client.py` | `ForlabsClient` — the only class the tools call. `reference()`, `scores()`, `schedule_raw()`, `homework()`. Discovers "own stream" from `sched/get_schedule`'s `meta.stream_ids`. Joins study ids to names. |
-| `dates.py` | `resolve_range()` (YYYY-MM-DD parsing + inclusive ranges + ISO-week default), `resolve_lessons()` (places abstract `day`/`position` lessons onto real calendar dates using the grid + a stated week-parity assumption). |
-| `tools/register.py` | Registers the 4 tools on the `MCPServer`, shapes their JSON output, converts `ForlabsError` to a classified, credential-free `ToolError`. |
-| `server.py` | CLI entry point (`forlabs-mcp`), builds the server + a lazy client factory, runs stdio transport. |
-| `errors.py` | The `ForlabsError` taxonomy + `to_tool_error()` (see §8). |
+| `config.py` | `ForlabsConfig` + `load_config()`. Ordinary settings: env > repo-local JSON token file > default. Assignment writes and upload root are env-only; writes default off. |
+| `client/session.py` | `ForlabsSession`: remember cookie, XSRF header, cookie persistence (`0600`). Safe reads may reset/retry once on `401`/`419`; writes disable auth retry to avoid duplicate non-idempotent requests. |
+| `client/repository.py` | `Repository.call()` enforces `READ_ONLY_ACTIONS` before HTTP. Separate fixed methods allow only the opted-in assignment comment, upload finalize/delete, and FlowJS chunk protocol. |
+| `client/models.py` | Pydantic models (`extra="ignore"`) for `Stream`, `Study`, schedule/score/task/assignment rows, `AssignmentComment`, and identity. |
+| `client/parsers.py` | Tolerant `payload -> model` functions; malformed rows become warnings where partial results are safe. |
+| `client/partial.py` | `PartialResult[T]` — parsed `data`, `warnings`, and partial-result state. |
+| `client/submissions.py` | Ten-minute, one-use preview records; path containment beneath the configured upload root; regular-file, size, identity, modification-time, and SHA-256 checks. |
+| `client/client.py` | Domain operations: own-stream discovery, own studies/grades/homework, schedule groups, task details/threads, and safe submission orchestration/read-back. |
+| `dates.py` | `resolve_range()` and `resolve_lessons()` calendar and week-parity calculations. |
+| `tools/register.py` | Registers eight default tools; conditionally registers the annotated non-idempotent submit tool. Converts `ForlabsError` to a classified `ToolError`. |
+| `server.py` | CLI entry point. Reads the submission switch to shape the tool catalog, then loads credentials lazily on first invocation. |
+| `errors.py` | `ForlabsError` taxonomy + `to_tool_error()` (see §8). |
 
 ## 5. Backend key → model field mapping
 
@@ -644,47 +689,87 @@ Module responsibilities:
 
 Every model uses `extra="ignore"` — a new backend field never breaks parsing.
 
-## 6. The 4 MCP tools — exact contracts
+## 6. MCP tools — exact contracts
 
-(Condensed from `openspec/specs/forlabs-diary-tools/spec.md` — see that file
-for the full normative SHALL/scenario text if resuming inside OpenSpec.)
+The default catalog has eight tools. The ninth, non-idempotent write tool is
+registered only when `FORLABS_ENABLE_ASSIGNMENT_SUBMISSION` is true.
 
-### `reference(stream_id?: int)`
+### `reference()`
 
-Returns: `identity {name, role}`, `own_stream_id`, `streams[] {id, name,
-is_own}`, `studies[] {id, name, teachers[], year, semester, is_current,
-tasks_count, exams_count}`, `warnings[]`.
-No identity endpoint exists — `identity` is always `{name: null, role: null}`;
-this is documented behavior, not a bug.
+Returns `identity {name, role}`, `own_stream_id`,
+`streams[] {id, name, is_own}` from the schedule-group catalog, own
+`studies[]` for the authenticated student, and `warnings[]`. No identity
+endpoint exists, so `identity` is `{name: null, role: null}`. There is no
+group-selection argument.
 
-### `grades(stream_id?: int, study_id?: int)`
+### `schedule_groups()`
 
-Returns: `scores[] {study_id, study_name, credits, status, status_label,
-grade?, name_note?}`, `warnings[]`, `note?` ("no grades found..." when empty).
-`status_label` comes from `SCORE_STATUS_LABELS = {1: "in progress", 2: "in
-progress", 5: "completed"}`.
+Returns `own_stream_id`, `groups[] {id, name, is_own}`, and `warnings[]`.
+This catalog comes from `sched/get_schedule.streams`; it lists schedule
+choices, not enrolled subjects.
 
-### `homework(stream_id?: int, study_id?: int, only_outstanding?: bool)`
+### `schedule(date?: str, start?: str, end?: str, stream_id?: int)`
 
-Without `study_id`, iterates every study of the target stream (one
-`learning/get_tasks` call each) and unions the rows; a failure on one study
-becomes a warning, not a total failure. Returns: `homework[] {task_id, title,
-study_id, study_name, status, is_done, credits_earned?, max_credits?, due_at?,
-assessed_at?, chapter?, files?}`, `warnings[]`, `note?`.
-`is_done` = `status in {3}` (`HOMEWORK_DONE_STATUSES`).
-
-### `schedule(date?: str, start?: str, end?: str)`
-
-`date` is mutually exclusive with `start`/`end` (validation error otherwise,
-checked before any backend call). Default range with no args: the current ISO
-week (Mon–Sun). Returns: `range` (human string), `timezone`, `week_variants`,
-`week_parity_basis` (states the ISO-week-parity assumption explicitly),
+`date` is mutually exclusive with `start`/`end`; validation occurs before
+backend calls. No range means the current ISO week (Mon–Sun). No `stream_id`
+means the student's own schedule; a selected group ID must be in
+`schedule_groups()`. Returns `range`, `timezone`, `week_variants`,
+`week_parity_basis`, selected `stream_id`/`stream_name`,
 `lessons[] {date, weekday, start, end, position, subject, study_id, kind,
-teacher, room, subgroup}`, `warnings[]`, `note?` ("no lessons..." when empty).
+teacher, room, subgroup}`, `warnings[]`, and optional `note`.
+
+### `grades(study_id?: int)`
+
+Returns grades only for the student's own studies, optionally filtered by
+study: `scores[] {study_id, study_name, credits, status, status_label,
+grade?, name_note?}`, `warnings[]`, optional `note`. `status_label` uses
+`SCORE_STATUS_LABELS = {1: "in progress", 2: "in progress", 5: "completed"}`.
+
+### `homework(study_id?: int, only_outstanding?: bool)`
+
+Without `study_id`, iterates every own study (one `learning/get_tasks` call
+each); a per-study failure becomes a warning. An explicit study must also
+belong to the authenticated student. Returns `homework[] {task_id, title,
+study_id, study_name, status, is_done, credits_earned?, max_credits?, due_at?,
+assessed_at?, chapter?, files?}`, `warnings[]`, optional `note`.
+`is_done` means `status in {3}`.
+
+### `assignment_details(study_id: int, task_id: int)`
+
+Accepts only a task in one of the student's own studies. Returns `study_id`,
+`study_name`, `task_id`, typed `task`, `assignment` (or `null` when not yet
+assigned), and `warnings[]`. Backend task/assignment IDs are cross-checked
+against the own-study task list.
+
+### `assignment_thread(study_id: int, task_id: int)`
+
+Returns the own task and unique assignment identity/status plus
+`comments[] {id, user_id, message, created_at, user, attachments}`,
+`warnings[]`, and a no-responses `note` when empty.
+
+### `preview_assignment_response(study_id, task_id, message, file_paths?)`
+
+Validates own-study scope and requires a unique assignment. Trims the message
+as the SPA does; text or at least one attachment is required. Returns a
+10-minute, one-use `preparation_id`, task/assignment metadata, the exact
+outgoing text, attachment names/sizes/MIME types (never local paths or
+hashes), and warnings. Attachment paths must stay under
+`FORLABS_UPLOAD_ROOT`; text-only previews need no upload root.
+
+### `submit_assignment_response(preparation_id)`
+
+Exists only when explicitly enabled. Consumes the matching preview once,
+revalidates assignment and file fingerprints, uploads/finalizes selected
+attachments if any, then posts `assignments/post_comment` in student mode
+without an `id`. Write requests are never automatically retried. It reads the
+thread after the request and reports `confirmed`, `accepted`, `uncertain`, or
+`not_sent`; inspect the thread manually before retrying any uncertain result.
 
 ## 7. Configuration
 
-Precedence: **environment variable > repo-local JSON token file > built-in default.**
+For ordinary settings represented in JSON: **environment variable > repo-local
+JSON token file > built-in default**. The security-sensitive assignment switch
+and attachment root are environment-only.
 
 | Setting | Env var | Default | Required |
 |---|---|---|---|
@@ -694,14 +779,17 @@ Precedence: **environment variable > repo-local JSON token file > built-in defau
 | Time zone | `FORLABS_TZ` | `Asia/Irkutsk` | no |
 | Session cache | `FORLABS_SESSION_PATH` | `~/.local/state/forlabs-mcp/session.json` | no |
 | Max list items | `FORLABS_MAX_ITEMS` | `200` | no |
+| Assignment response writes (`true`/`1`, `false`/`0`) | `FORLABS_ENABLE_ASSIGNMENT_SUBMISSION` | `false` | no |
+| Allowed attachment root (environment only) | `FORLABS_UPLOAD_ROOT` | — | no |
 
 Token file: `forlabs-session.json` at the repo root (gitignored; copy from
 the committed `forlabs-session.example.json`), path overridable via
-`FORLABS_TOKEN_FILE`. It is a flat JSON object with the same keys as the
-table (`session_token`, `base_url`, `timeout_seconds`, `timezone`,
-`session_path`, `max_items`). The placeholder token value counts as missing.
-The former `~/.config/forlabs-mcp/config.toml` source was removed and is
-no longer read.
+`FORLABS_TOKEN_FILE`. It contains the ordinary settings
+`session_token`, `base_url`, `timeout_seconds`, `timezone`, `session_path`,
+and `max_items`. The submission switch defaults to false and is not read
+from the token file; `FORLABS_UPLOAD_ROOT` is also environment-only. The
+placeholder token counts as missing; the former
+`~/.config/forlabs-mcp/config.toml` source is no longer read.
 
 ## 8. Error taxonomy
 
@@ -712,24 +800,26 @@ by `to_tool_error()` to a classified, credential-free, single-line message:
 |---|---|---|
 | `ConfigError` | missing/malformed setting at startup | `key` |
 | `InvalidArgumentError` | bad tool argument, checked before any backend call | `argument` |
-| `AuthError` | `401`/`419` repeated after one session-reset retry: session token rejected (`401`) or CSRF rejected (`419`) | — |
+| `AuthError` | `401`/`419`: safe reads retry once after a session reset; non-idempotent writes fail without retry | — |
 | `ConnectivityError` | host unreachable / DNS / connection reset | — |
 | `TimeoutError` | request exceeded configured timeout | — |
 | `RateLimitError` | backend rate-limited | `retry_after` |
 | `UpstreamError` | backend returned an application error | `module`, `action` |
-| `ProgrammingError` | action not on the read-only allow-list, or client misuse | — |
+| `ProgrammingError` | action off the read-only allow-list, disabled submission, or client misuse | — |
 
 `to_tool_error()` never lets a raw exception or stack trace reach tool output
 — an unrecognized exception collapses to a generic "Unexpected error…" line.
 
 ## 9. Testing approach
 
+- Submission tests mock thread reads, the fixed comment write, FlowJS chunk
+  requests, upload finalization/cleanup, file confinement, and ambiguous
+  write outcomes. The only authorized live write is one text-only `.` to the
+  user's first own 1C assignment; live file upload is not authorized.
 - `tests/fixtures/*.json` — the synthetic payloads in §3, used with
   [`respx`](https://github.com/lundberg/respx) to mock the HTTP layer; no real
   network in the default test run.
 - `uv run pytest` — unit + mocked-HTTP tests (fast, no credentials needed).
-- `uv run pytest -m integration` (only runs when `FORLABS_SESSION_TOKEN` is
-  set) — hits the real backend for a smoke check (`reference` + `schedule`).
 - `tests/test_repo_privacy.py` + `tools/leakscan.py` — a guardrail scanning
   **every git-tracked text file** (via `git ls-files`, so the gitignored
   `forlabs-session.json` is never read; `uv.lock` and binaries skipped) for:

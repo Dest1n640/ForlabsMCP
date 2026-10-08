@@ -1,0 +1,12 @@
+{
+  "streams": [
+    {
+      "id": 210,
+      "status": 1,
+      "code": "SYNTHETIC-210",
+      "short_name": "Synthetic own group",
+      "student_id": 3210,
+      "student": {"id": 3210}
+    }
+  ]
+}

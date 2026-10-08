@@ -8,15 +8,36 @@ import pytest
 from forlabs_mcp.server import build_server
 
 
-def test_build_server_registers_four_tools_without_loading_config(
+def test_build_server_registers_eight_safe_tools_without_loading_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("FORLABS_SESSION_TOKEN", raising=False)
+    monkeypatch.delenv("FORLABS_ENABLE_ASSIGNMENT_SUBMISSION", raising=False)
 
     server = build_server()
 
     tools = asyncio.run(server.list_tools())
-    assert {t.name for t in tools} == {"reference", "grades", "homework", "schedule"}
+    assert {tool.name for tool in tools} == {
+        "reference",
+        "schedule_groups",
+        "schedule",
+        "grades",
+        "homework",
+        "assignment_details",
+        "assignment_thread",
+        "preview_assignment_response",
+    }
+
+
+def test_build_server_registers_write_tool_only_when_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("FORLABS_SESSION_TOKEN", raising=False)
+    monkeypatch.setenv("FORLABS_ENABLE_ASSIGNMENT_SUBMISSION", "true")
+
+    tools = asyncio.run(build_server().list_tools())
+
+    assert "submit_assignment_response" in {tool.name for tool in tools}
 
 
 def test_server_process_starts_over_stdio_without_a_live_backend_connection() -> None:

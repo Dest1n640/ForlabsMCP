@@ -1,0 +1,44 @@
+{
+  "task": {
+    "id": 7001,
+    "name": "Synthetic task",
+    "content": "<p>Complete the synthetic exercise.</p>",
+    "type": 1,
+    "course_id": 71,
+    "chapter_id": 72,
+    "chapter_title": "Synthetic chapter",
+    "chapter_has_content": true,
+    "level": 1,
+    "files": [
+      {
+        "id": 7301,
+        "type": "text",
+        "filename": "sample.txt",
+        "mime_type": "text/plain",
+        "size": 12,
+        "url": "https://example.invalid/sample.txt",
+        "human_size": "12 B"
+      }
+    ],
+    "pivot_status": 1,
+    "pivot_cost": 10,
+    "pivot_sort": 1,
+    "pivot_type": 1,
+    "pivot_start_at": null,
+    "pivot_end_at": "2026-04-01T00:00:00.000000Z",
+    "pivot_description": null
+  },
+  "assignment": {
+    "id": 8001,
+    "task_id": 7001,
+    "status": 1,
+    "choice": null,
+    "variant": null,
+    "options": null,
+    "last_replied_at": null,
+    "assessment_credits": null,
+    "assessment_date": null,
+    "assessment_lecturer_id": null,
+    "responses_count": 0
+  }
+}

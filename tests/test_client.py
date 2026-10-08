@@ -7,7 +7,7 @@ import respx
 
 from forlabs_mcp.client.client import ForlabsClient
 from forlabs_mcp.config import ForlabsConfig
-from forlabs_mcp.errors import InvalidArgumentError
+from forlabs_mcp.errors import InvalidArgumentError, UpstreamError
 
 BASE_URL = "https://bki.forlabs.ru"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -28,6 +28,24 @@ def _config(tmp_path) -> ForlabsConfig:
 def _mock_xsrf_prime() -> None:
     respx.get(f"{BASE_URL}/app/login").mock(
         return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+
+
+def _mock_own_schedule():
+    return respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json=_load("sched_get_schedule.json"))
+    )
+
+
+def _mock_assignment_context(tasks_fixture: dict | None = None):
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+    return respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
+        return_value=httpx.Response(
+            200, json=tasks_fixture or _load("learning_get_tasks_assignments.json")
+        )
     )
 
 
@@ -64,33 +82,28 @@ def test_reference_without_stream_id_uses_own_stream(tmp_path) -> None:
 
 
 @respx.mock
-def test_reference_with_explicit_stream_id_filters_studies_call(tmp_path) -> None:
+def test_schedule_groups_come_from_schedule_response_without_subject_data(tmp_path) -> None:
     _mock_xsrf_prime()
-    schedule_fixture = _load("sched_get_schedule.json")
-    studies_fixture = _load("learning_get_studies.json")
-    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
-        return_value=httpx.Response(200, json=schedule_fixture)
-    )
-    studies_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
-        return_value=httpx.Response(200, json=studies_fixture)
+    schedule_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json=_load("sched_get_schedule_groups.json"))
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.reference(stream_id=199)
+    result = ForlabsClient(_config(tmp_path)).schedule_groups()
 
-    # own_stream_id is still discovered from sched/get_schedule regardless
-    # of the explicit filter.
-    assert result["own_stream_id"] == 205
-    own_streams = [s for s in result["streams"] if s["is_own"]]
-    assert own_streams == [{"id": 205, "name": "14323-ДБ (ПИ)", "is_own": True}]
-
-    sent_body = json.loads(studies_route.calls.last.request.content)
-    assert sent_body == {"stream_id": 199}
+    assert result["own_stream_id"] == 210
+    assert result["groups"] == [
+        {"id": 210, "name": "Synthetic own group", "is_own": True},
+        {"id": 211, "name": "Synthetic schedule group", "is_own": False},
+    ]
+    assert all(type(group["id"]) is int for group in result["groups"])
+    assert json.loads(schedule_route.calls.last.request.content) == {}
+    assert not any("/learning/" in str(call.request.url) for call in respx.calls)
 
 
 @respx.mock
 def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     scores_fixture = _load("learning_get_scores.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
@@ -100,8 +113,7 @@ def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
         return_value=httpx.Response(200, json=studies_fixture)
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.scores(stream_id=205)
+    result = ForlabsClient(_config(tmp_path)).scores()
 
     assert result["warnings"] == []
     assert "note" not in result
@@ -114,10 +126,8 @@ def test_scores_joins_study_name_and_status_label(tmp_path) -> None:
 @respx.mock
 def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     scores_fixture = _load("learning_get_scores.json")
-    # No matching entry in the studies fixture for any of these study_ids
-    # under stream 205 alone would already be a stretch; force the case by
-    # using a stream whose studies fixture is empty.
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
         return_value=httpx.Response(200, json=scores_fixture)
     )
@@ -125,8 +135,7 @@ def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
         return_value=httpx.Response(200, json={"studies": []})
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.scores(stream_id=205)
+    result = ForlabsClient(_config(tmp_path)).scores()
 
     assert len(result["scores"]) == len(scores_fixture["scores"])
     for row in result["scores"]:
@@ -137,6 +146,7 @@ def test_scores_with_unresolvable_study_id_still_succeeds(tmp_path) -> None:
 @respx.mock
 def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     scores_fixture = _load("learning_get_scores.json")
     studies_fixture = _load("learning_get_studies.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
@@ -146,8 +156,7 @@ def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
         return_value=httpx.Response(200, json=studies_fixture)
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.scores(stream_id=205, study_id=8975)
+    result = ForlabsClient(_config(tmp_path)).scores(study_id=8975)
 
     assert len(result["scores"]) == 1
     assert result["scores"][0]["study_id"] == 8975
@@ -156,6 +165,7 @@ def test_scores_filtered_by_study_id_narrows_to_one_row(tmp_path) -> None:
 @respx.mock
 def test_scores_with_no_matches_returns_note(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
         return_value=httpx.Response(200, json={"scores": {}})
     )
@@ -163,27 +173,143 @@ def test_scores_with_no_matches_returns_note(tmp_path) -> None:
         return_value=httpx.Response(200, json={"studies": []})
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.scores(stream_id=205)
+    result = ForlabsClient(_config(tmp_path)).scores()
 
     assert result["scores"] == []
     assert "note" in result
 
 
 @respx.mock
-def test_scores_with_explicit_stream_id_never_discovers_own_stream(tmp_path) -> None:
+def test_scores_always_uses_discovered_own_stream(tmp_path) -> None:
     _mock_xsrf_prime()
-    # No sched/get_schedule route is registered at all - if the client
-    # called it, respx would raise for the unmatched request.
-    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
+    schedule_route = _mock_own_schedule()
+    scores_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_scores").mock(
         return_value=httpx.Response(200, json={"scores": {}})
     )
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
         return_value=httpx.Response(200, json={"studies": []})
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    client.scores(stream_id=205)
+    ForlabsClient(_config(tmp_path)).scores()
+
+    assert json.loads(schedule_route.calls.last.request.content) == {}
+    assert json.loads(scores_route.calls.last.request.content) == {"stream_id": 205}
+
+
+@respx.mock
+def test_assignment_details_resolves_task_only_from_own_study(tmp_path) -> None:
+    _mock_xsrf_prime()
+    tasks_route = _mock_assignment_context()
+    detail_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_task").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_task.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).assignment_details(10823, 7001)
+
+    assert result["task_id"] == 7001
+    assert result["task"]["description_html"] == "<p>Complete the synthetic exercise.</p>"
+    assert result["assignment"]["id"] == 8001
+    assert json.loads(tasks_route.calls.last.request.content) == {
+        "stream_id": "205",
+        "study_id": "10823",
+    }
+    assert json.loads(detail_route.calls.last.request.content) == {
+        "stream_id": "205",
+        "study_id": "10823",
+        "task_id": "7001",
+    }
+
+
+@respx.mock
+def test_assignment_details_rejects_non_own_study_before_task_requests(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).assignment_details(999, 7001)
+
+    assert not any(
+        "/learning/get_tasks" in str(call.request.url)
+        or "/learning/get_task" in str(call.request.url)
+        for call in respx.calls
+    )
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "detail_payload",
+    [
+        {"task": "not-an-object"},
+        {"task": {**_load("learning_get_task.json")["task"], "id": 7002}},
+    ],
+)
+def test_assignment_details_rejects_malformed_or_mismatched_task_detail(
+    tmp_path, detail_payload: dict
+) -> None:
+    _mock_xsrf_prime()
+    _mock_assignment_context()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_task").mock(
+        return_value=httpx.Response(200, json=detail_payload)
+    )
+
+    with pytest.raises(UpstreamError):
+        ForlabsClient(_config(tmp_path)).assignment_details(10823, 7001)
+
+    assert not any("/assignments/" in str(call.request.url) for call in respx.calls)
+
+
+@respx.mock
+def test_assignment_thread_uses_own_assignment_id_and_reads_comments_only(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_assignment_context()
+    comments_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/assignments/get_comments").mock(
+        return_value=httpx.Response(200, json=_load("assignments_get_comments.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).assignment_thread(10823, 7001)
+
+    assert result["assignment_id"] == 8001
+    assert result["comments"][0]["message"] == "Synthetic response text"
+    assert result["comments"][0]["user"]["name"] == "Synthetic Student"
+    assert json.loads(comments_route.calls.last.request.content) == {
+        "study_id": "10823",
+        "task_id": 7001,
+        "assignment_id": 8001,
+    }
+    assert not any(
+        action in str(call.request.url)
+        for call in respx.calls
+        for action in ("/assignments/post_comment", "/uploads/store", "/uploads/delete", "/upload")
+    )
+
+
+@respx.mock
+def test_assignment_thread_rejects_missing_assignment_before_comments_request(tmp_path) -> None:
+    _mock_xsrf_prime()
+    tasks_route = _mock_assignment_context()
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).assignment_thread(10823, 7002)
+
+    assert tasks_route.called
+    assert not any("/assignments/get_comments" in str(call.request.url) for call in respx.calls)
+
+
+@respx.mock
+def test_assignment_thread_rejects_ambiguous_assignment_mapping(tmp_path) -> None:
+    _mock_xsrf_prime()
+    task_data = _load("learning_get_tasks_assignments.json")
+    duplicate = {**task_data["assignments"][0], "id": 8002}
+    task_data["assignments"].append(duplicate)
+    _mock_assignment_context(task_data)
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).assignment_thread(10823, 7001)
+
+    assert not any("/assignments/get_comments" in str(call.request.url) for call in respx.calls)
 
 
 def _tasks_side_effect_only_for_study(target_study_id: str, tasks_fixture: dict):
@@ -197,8 +323,9 @@ def _tasks_side_effect_only_for_study(target_study_id: str, tasks_fixture: dict)
 
 
 @respx.mock
-def test_homework_without_study_id_unions_across_studies(tmp_path) -> None:
+def test_homework_without_study_id_unions_across_own_studies(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -208,21 +335,20 @@ def test_homework_without_study_id_unions_across_studies(tmp_path) -> None:
         side_effect=_tasks_side_effect_only_for_study("10823", tasks_fixture)
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.homework(stream_id=205)
+    result = ForlabsClient(_config(tmp_path)).homework()
 
     assert result["warnings"] == []
     assert len(result["homework"]) == len(tasks_fixture["tasks"])
     assert all(row["study_id"] == 10823 for row in result["homework"])
     assert all(row["study_name"] == "Управление базами данных" for row in result["homework"])
     assert all(row["is_done"] is True for row in result["homework"])
-    # one learning/get_tasks call per study in the studies fixture
     assert tasks_route.call_count == len(studies_fixture["studies"])
 
 
 @respx.mock
 def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -241,8 +367,7 @@ def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) ->
         side_effect=_side_effect
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.homework(stream_id=205)
+    result = ForlabsClient(_config(tmp_path)).homework()
 
     assert len(result["homework"]) == len(tasks_fixture["tasks"])
     assert len(result["warnings"]) == 1
@@ -252,6 +377,7 @@ def test_homework_one_failing_study_becomes_a_warning_not_a_failure(tmp_path) ->
 @respx.mock
 def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     partial_tasks_fixture = {
@@ -266,8 +392,8 @@ def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
     )
 
     client = ForlabsClient(_config(tmp_path))
-    all_result = client.homework(stream_id=205)
-    outstanding_result = client.homework(stream_id=205, only_outstanding=True)
+    all_result = client.homework()
+    outstanding_result = client.homework(only_outstanding=True)
 
     assert len(all_result["homework"]) == 3
     assert len(outstanding_result["homework"]) == 2
@@ -275,8 +401,9 @@ def test_homework_only_outstanding_excludes_done_items(tmp_path) -> None:
 
 
 @respx.mock
-def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
+def test_homework_with_own_study_id_calls_get_tasks_once(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     studies_fixture = _load("learning_get_studies.json")
     tasks_fixture = _load("learning_get_tasks.json")
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
@@ -286,8 +413,7 @@ def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
         return_value=httpx.Response(200, json=tasks_fixture)
     )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.homework(stream_id=205, study_id=10823)
+    result = ForlabsClient(_config(tmp_path)).homework(study_id=10823)
 
     assert tasks_route.call_count == 1
     sent_body = json.loads(tasks_route.calls.last.request.content)
@@ -296,20 +422,31 @@ def test_homework_with_explicit_study_id_calls_get_tasks_once(tmp_path) -> None:
 
 
 @respx.mock
-def test_homework_with_no_results_returns_note(tmp_path) -> None:
+def test_homework_with_no_own_studies_returns_note(tmp_path) -> None:
     _mock_xsrf_prime()
+    _mock_own_schedule()
     respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
         return_value=httpx.Response(200, json={"studies": []})
     )
-    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_tasks").mock(
-        return_value=httpx.Response(200, json={"tasks": [], "assignments": []})
-    )
 
-    client = ForlabsClient(_config(tmp_path))
-    result = client.homework(stream_id=205, study_id=999)
+    result = ForlabsClient(_config(tmp_path)).homework()
 
     assert result["homework"] == []
     assert "note" in result
+
+
+@respx.mock
+def test_homework_rejects_study_outside_own_enrolment_before_get_tasks(tmp_path) -> None:
+    _mock_xsrf_prime()
+    _mock_own_schedule()
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/learning/get_studies").mock(
+        return_value=httpx.Response(200, json=_load("learning_get_studies.json"))
+    )
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).homework(study_id=999)
+
+    assert not any("/learning/get_tasks" in str(call.request.url) for call in respx.calls)
 
 
 @respx.mock(assert_all_called=False)
@@ -330,12 +467,15 @@ def test_schedule_raw_places_lessons_and_reports_week_parity_basis(tmp_path) -> 
     respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
         return_value=httpx.Response(200, json=grid_fixture)
     )
-    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+    schedule_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
         return_value=httpx.Response(200, json=schedule_fixture)
     )
 
     client = ForlabsClient(_config(tmp_path))
     result = client.schedule_raw(start="2026-03-02", end="2026-03-15")
+    assert json.loads(schedule_route.calls.last.request.content) == {}
+    assert result["stream_id"] == 205
+    assert result["stream_name"] == "14323-ДБ (ПИ)"
 
     assert len(result["lessons"]) == len(schedule_fixture["entries"])
     assert result["week_variants"] == 2
@@ -348,6 +488,55 @@ def test_schedule_raw_places_lessons_and_reports_week_parity_basis(tmp_path) -> 
     assert lesson["subject"] == "Экономическая теория"
     assert lesson["start"] == "10:10"
     assert lesson["weekday"] == 0
+
+
+@respx.mock
+def test_schedule_raw_fetches_selected_group_after_validating_group_list(tmp_path) -> None:
+    _mock_xsrf_prime()
+    group_fixture = _load("sched_get_schedule_groups.json")
+    selected_schedule = _load("sched_get_schedule.json")
+
+    def _schedule_response(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        if body == {}:
+            return httpx.Response(200, json=group_fixture)
+        assert body == {"stream_id": 211}
+        return httpx.Response(200, json=selected_schedule)
+
+    schedule_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        side_effect=_schedule_response
+    )
+    respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        return_value=httpx.Response(200, json=_load("sched_get_grid.json"))
+    )
+
+    result = ForlabsClient(_config(tmp_path)).schedule_raw(date="2026-03-02", stream_id=211)
+
+    assert schedule_route.call_count == 2
+    assert [json.loads(call.request.content) for call in schedule_route.calls] == [
+        {},
+        {"stream_id": 211},
+    ]
+    assert result["stream_id"] == 211
+    assert result["stream_name"] == "Synthetic schedule group"
+
+
+@respx.mock
+def test_schedule_raw_rejects_unknown_group_before_grid_or_group_request(tmp_path) -> None:
+    _mock_xsrf_prime()
+    schedule_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_schedule").mock(
+        return_value=httpx.Response(200, json=_load("sched_get_schedule_groups.json"))
+    )
+    grid_route = respx.post(f"{BASE_URL}/lm-vendor/repositories/sched/get_grid").mock(
+        return_value=httpx.Response(200, json=_load("sched_get_grid.json"))
+    )
+
+    with pytest.raises(InvalidArgumentError):
+        ForlabsClient(_config(tmp_path)).schedule_raw(date="2026-03-02", stream_id=999)
+
+    assert schedule_route.call_count == 1
+    assert json.loads(schedule_route.calls.last.request.content) == {}
+    assert grid_route.call_count == 0
 
 
 @respx.mock

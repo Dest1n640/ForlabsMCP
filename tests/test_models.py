@@ -3,6 +3,7 @@ from pathlib import Path
 
 from forlabs_mcp.client.models import (
     Assignment,
+    AssignmentComment,
     Identity,
     Lesson,
     ScheduleGrid,
@@ -99,6 +100,28 @@ def test_assignment_builds_from_tasks_fixture_with_credit_aliases() -> None:
     assert assignment.task_id == 5
     assert assignment.credits == 2
     assert assignment.assessed_at == "2026-03-12"
+
+
+def test_assignment_detail_fixture_builds_typed_task_and_assignment() -> None:
+    data = _load("learning_get_task.json")
+    task = Task.model_validate(data["task"])
+    assignment = Assignment.model_validate(data["assignment"])
+
+    assert task.id == 7001
+    assert task.description_html == "<p>Complete the synthetic exercise.</p>"
+    assert assignment.id == 8001
+    assert assignment.task_id == task.id
+
+
+def test_assignment_comment_fixture_keeps_typed_response_fields() -> None:
+    data = _load("assignments_get_comments.json")
+    comment = AssignmentComment.model_validate(data["comments"][0])
+
+    assert comment.id == 9001
+    assert comment.user_id == 3210
+    assert comment.message == "Synthetic response text"
+    assert comment.created_at == "2026-04-02 12:30:00"
+    assert comment.attachments[0]["filename"] == "answer.txt"
 
 
 def test_unexpected_extra_field_does_not_raise() -> None:
