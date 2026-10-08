@@ -13,6 +13,8 @@ _ALL_ENV_VARS = [
     "FORLABS_SESSION_PATH",
     "FORLABS_MAX_ITEMS",
     "FORLABS_TOKEN_FILE",
+    "FORLABS_ENABLE_ASSIGNMENT_SUBMISSION",
+    "FORLABS_UPLOAD_ROOT",
 ]
 
 
@@ -60,8 +62,22 @@ def test_unexpanded_placeholder_env_without_file_is_missing_token(
 @pytest.mark.parametrize(
     ("env_var", "placeholder", "key", "file_value", "attr", "expected"),
     [
-        ("FORLABS_BASE_URL", "${FORLABS_BASE_URL}", "base_url", "https://file.example", "base_url", "https://file.example"),
-        ("FORLABS_BASE_URL", "https://${HOST}", "base_url", None, "base_url", "https://bki.forlabs.ru"),
+        (
+            "FORLABS_BASE_URL",
+            "${FORLABS_BASE_URL}",
+            "base_url",
+            "https://file.example",
+            "base_url",
+            "https://file.example",
+        ),
+        (
+            "FORLABS_BASE_URL",
+            "https://${HOST}",
+            "base_url",
+            None,
+            "base_url",
+            "https://bki.forlabs.ru",
+        ),
         ("FORLABS_MAX_ITEMS", "${FORLABS_MAX_ITEMS}", "max_items", 7, "max_items", 7),
         ("FORLABS_MAX_ITEMS", "${FORLABS_MAX_ITEMS}", "max_items", None, "max_items", 200),
     ],
@@ -163,12 +179,42 @@ def test_defaults_are_applied_when_optional_settings_absent(
     assert config.timeout_seconds == 30.0
     assert config.timezone == "Asia/Irkutsk"
     assert config.max_items == 200
+    assert config.assignment_submission_enabled is False
+    assert config.upload_root is None
 
 
-def test_redacted_never_contains_the_session_token() -> None:
-    config = ForlabsConfig(session_token="super-secret-value")
+def test_redacted_never_contains_tokens_or_upload_paths(tmp_path) -> None:
+    upload_root = tmp_path / "private-files"
+    config = ForlabsConfig(session_token="super-secret-value", upload_root=upload_root)
 
     redacted = config.redacted()
 
     assert "super-secret-value" not in repr(redacted)
+    assert str(upload_root) not in repr(redacted)
     assert redacted["session_token"] == "***"
+    assert redacted["upload_root_configured"] is True
+
+
+def test_assignment_submission_and_upload_root_use_explicit_environment(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FORLABS_SESSION_TOKEN", "token")
+    monkeypatch.setenv("FORLABS_ENABLE_ASSIGNMENT_SUBMISSION", "true")
+    monkeypatch.setenv("FORLABS_UPLOAD_ROOT", str(tmp_path))
+
+    config = load_config()
+
+    assert config.assignment_submission_enabled is True
+    assert config.upload_root == tmp_path
+
+
+def test_invalid_assignment_submission_flag_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FORLABS_SESSION_TOKEN", "token")
+    monkeypatch.setenv("FORLABS_ENABLE_ASSIGNMENT_SUBMISSION", "enabled")
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+
+    assert excinfo.value.key == "FORLABS_ENABLE_ASSIGNMENT_SUBMISSION"

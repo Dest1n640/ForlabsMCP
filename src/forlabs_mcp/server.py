@@ -13,7 +13,7 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from .client.client import ForlabsClient
-from .config import load_config
+from .config import assignment_submission_enabled_from_env, load_config
 from .tools.register import register_tools
 
 
@@ -28,7 +28,11 @@ def build_server() -> MCPServer:
             client = ForlabsClient(load_config())
         return client
 
-    register_tools(server, client_factory)
+    register_tools(
+        server,
+        client_factory,
+        submission_enabled=assignment_submission_enabled_from_env(),
+    )
     return server
 
 

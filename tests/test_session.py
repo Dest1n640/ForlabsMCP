@@ -108,6 +108,26 @@ def test_persistent_csrf_mismatch_raises_auth_error_not_blaming_the_token(tmp_pa
 
 
 @respx.mock
+def test_non_idempotent_auth_failure_is_not_retried_or_misreported(
+    tmp_path,
+) -> None:
+    respx.get(f"{BASE_URL}/app/login").mock(
+        return_value=httpx.Response(200, headers=[("set-cookie", "XSRF-TOKEN=abc; Path=/")])
+    )
+    data_route = respx.post(f"{BASE_URL}{DATA_PATH}").mock(
+        return_value=httpx.Response(419, json={"message": "CSRF token mismatch."})
+    )
+
+    session = ForlabsSession(_config(tmp_path))
+    with pytest.raises(AuthError) as exc_info:
+        session.request("POST", DATA_PATH, {}, retry_auth=False)
+
+    assert data_route.call_count == 1
+    assert "not retried" in str(exc_info.value)
+    assert "fresh session was established" not in str(exc_info.value)
+
+
+@respx.mock
 def test_stale_cached_session_is_reset_retried_and_rewritten(tmp_path) -> None:
     config = _config(tmp_path)
     _write_cache(

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from forlabs_mcp.client.parsers import (
+    parse_assignment_comments,
     parse_assignments,
     parse_lessons,
     parse_schedule_grid,
@@ -75,6 +76,38 @@ def test_parse_tasks_and_assignments_all_valid() -> None:
     assert tasks_result.is_partial is False
     assert len(assignments_result.data) == len(data["assignments"])
     assert assignments_result.is_partial is False
+
+
+def test_task_assignment_mapping_uses_task_id_and_keeps_unassigned_tasks() -> None:
+    data = _load("learning_get_tasks_assignments.json")
+    tasks = parse_tasks(data["tasks"]).data
+    assignments = parse_assignments(data["assignments"]).data
+    assignments_by_task_id = {assignment.task_id: assignment for assignment in assignments}
+
+    assert assignments_by_task_id[tasks[0].id].id == 8001
+    assert tasks[1].id not in assignments_by_task_id
+
+
+def test_parse_assignment_comments_preserves_valid_rows_and_types() -> None:
+    comments = _load("assignments_get_comments.json")["comments"]
+
+    result = parse_assignment_comments(comments)
+
+    assert result.is_partial is False
+    assert result.data[0].id == 9001
+    assert result.data[0].user_id == 3210
+    assert result.data[0].message == "Synthetic response text"
+    assert result.data[0].attachments[0]["size"] == 4
+
+
+def test_parse_assignment_comments_skips_malformed_rows_without_losing_valid_data() -> None:
+    valid = _load("assignments_get_comments.json")["comments"][0]
+    result = parse_assignment_comments([valid, {"id": 9002, "user_id": 3}])
+
+    assert len(result.data) == 1
+    assert result.data[0].id == 9001
+    assert result.is_partial is True
+    assert "assignment comment" in result.warnings[0]
 
 
 def test_parse_schedule_grid_builds_from_grid_fixture() -> None:

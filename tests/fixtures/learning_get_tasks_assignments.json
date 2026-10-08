@@ -1,0 +1,29 @@
+{
+  "tasks": [
+    {
+      "id": 7001,
+      "name": "Synthetic task",
+      "content": "<p>Complete the synthetic exercise.</p>",
+      "pivot_cost": 10,
+      "pivot_end_at": "2026-04-01T00:00:00.000000Z"
+    },
+    {
+      "id": 7002,
+      "name": "Synthetic unassigned task",
+      "content": "<p>Another synthetic exercise.</p>",
+      "pivot_cost": 5,
+      "pivot_end_at": null
+    }
+  ],
+  "assignments": [
+    {
+      "id": 8001,
+      "task_id": 7001,
+      "status": 1,
+      "last_replied_at": null,
+      "assessment_credits": null,
+      "assessment_date": null,
+      "responses_count": 0
+    }
+  ]
+}

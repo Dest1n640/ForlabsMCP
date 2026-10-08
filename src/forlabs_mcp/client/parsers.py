@@ -13,7 +13,16 @@ from typing import Any, TypeVar
 
 from pydantic import ValidationError
 
-from .models import Assignment, Lesson, ScheduleGrid, Score, Stream, Study, Task
+from .models import (
+    Assignment,
+    AssignmentComment,
+    Lesson,
+    ScheduleGrid,
+    Score,
+    Stream,
+    Study,
+    Task,
+)
 from .partial import PartialResult
 
 ModelT = TypeVar("ModelT")
@@ -63,3 +72,9 @@ def parse_schedule_grid(raw: Mapping[str, Any]) -> ScheduleGrid:
     partial subset to salvage, so this simply validates and lets a bad
     payload raise."""
     return ScheduleGrid.model_validate(raw)
+
+
+def parse_assignment_comments(
+    raw: Iterable[Mapping[str, Any]],
+) -> PartialResult[list[AssignmentComment]]:
+    return _parse_rows(raw, AssignmentComment, "assignment comment")

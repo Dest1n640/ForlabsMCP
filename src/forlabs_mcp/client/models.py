@@ -137,3 +137,12 @@ class Assignment(_ForlabsModel):
     assessed_at: str | None = Field(alias="assessment_date", default=None)
     assessment_lecturer_id: int | None = None
     responses_count: int = 0
+
+
+class AssignmentComment(_ForlabsModel):
+    id: int
+    user_id: int | None = None
+    message: str
+    created_at: str | None = None
+    user: dict[str, Any] | None = None
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
